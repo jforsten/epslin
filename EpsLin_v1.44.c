@@ -719,10 +719,10 @@ void PrintDir(unsigned char Efe[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
     printf("{\n");
     printf(" \"file\":\"%s\",\n", in_file);
     printf(" \"label\":\"%s\",\n", DiskLabel);
-    printf(" \"used_blocks\":\"%ld\",\n", used_blks);
-    printf(" \"used_bytes\":\"%ld\",\n", (unsigned long)(used_blks)*512);
-    printf(" \"free_blocks\":\"%ld\",\n", free_blks);
-    printf(" \"free_bytes\":\"%ld\",\n", (unsigned long)(free_blks)*512);
+    printf(" \"used_blocks\":%ld,\n", used_blks);
+    printf(" \"used_bytes\":%ld,\n", (unsigned long)(used_blks)*512);
+    printf(" \"free_blocks\":%ld,\n", free_blks);
+    printf(" \"free_bytes\":%ld,\n", (unsigned long)(free_blks)*512);
     printf(" \"items\":[\n");  
   }
   else
@@ -819,12 +819,12 @@ void PrintDir(unsigned char Efe[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
         if (first_item == 0) { printf(",\n"); }
         
         printf("   {\n");
-        printf("     \"index\":\"%d\",\n", j);
-        printf("     \"type_id\":\"%d\",\n", real_type);
+        printf("     \"index\":%d,\n", j);
+        printf("     \"type_id\":%d,\n", real_type);
         printf("     \"type\":\"%s\",\n", EpsTypes[type]);
         printf("     \"name\":\"%s\",\n", name);
-        printf("     \"blocks\":\"%d\",\n", size);
-        printf("     \"bytes\":\"%d\",\n", (unsigned long)(size + 1) * 512);
+        printf("     \"blocks\":%d,\n", size);
+        printf("     \"bytes\":%d,\n", (unsigned long)(size + 1) * 512);
 
         char tmp_name[64];
         char tmp_type_text[10];
