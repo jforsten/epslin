@@ -25,19 +25,40 @@
 //  TO COMPILE:
 //  ===========
 //
-//  Should compile in Linux, OSX and Windows (Cygwin) just typing:
+//  Linux
+//  -----
 //
-//    gcc EpsLin_v1.44.c -o epslin
+//    Just type:
 //
-//  In OSX two header files (fd.h & frderg.h) should be in the same folder
+//      gcc EpsLin_v1.44.c -o epslin
+//
+//  Mac OS X 
+//  ---------
+//
+//    In OSX two header files (fd.h & frderg.h) should be in the same folder
+//  
+//      gcc EpsLin_v1.44.c -o epslin
 // 
-//  In windows you have to install "fdrawcmd.sys" from
-//         http://simonowen.com/fdrawcmd/
+//  Windows
+//  -------
 //
-//  and get the header file from
-//         http://simonowen.com/fdrawcmd/fdrawcmd.h
+//    1) Install Cygwin 32-bit (with GCC): https://www.cygwin.com/
 //
-//  and put it in the same dir as the EpsLin source
+//    2) To access floppy you have to install "fdrawcmd.sys" from
+//          http://simonowen.com/fdrawcmd/
+//
+//       and get the header file from
+//          http://simonowen.com/fdrawcmd/fdrawcmd.h
+//
+//       (like using: "curl https://simonowen.com/fdrawcmd/fdrawcmd.h --output fdrawcmd.h")
+//
+//       and put it in the same dir as the EpsLin source
+//   
+//    3) gcc EpsLin_v1.44.c -o epslin
+//
+//    4) You need cygwin DLL (cygwin1.dll) in the same folder when running epslin.exe outside cygwin shell.
+//       (This DLL is found in C:/cygwin/bin/ or you can load it from the cygwin web site)
+//
 //
 //  HISTORY
 //  =======
@@ -175,6 +196,8 @@
 // Uncommnet to enter debug state...
 //#define DEBUG
 
+#define VERSION "v1.44"
+
 #include <ctype.h>
 #include <stdio.h>
 #include <errno.h>
@@ -182,10 +205,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <getopt.h>
 
 #ifdef __APPLE__
 #include <sys/uio.h>
-#else
+#elif !defined(__CYGWIN__) 
 #include <sys/io.h>
 #endif
 
@@ -213,12 +237,6 @@
                    // In linux this is not defined so set it to 0 \
                    // (this walue is ORed, so no harm is done..)
 
-#endif
-
-#ifdef __CYGWIN__
-#define VERSION "v1.42 (Beta for Windows)"
-#else
-#define VERSION "v1.43"
 #endif
 
 #ifdef __CYGWIN__
@@ -308,8 +326,8 @@
 #endif
 
 // For 'getopt'
-extern char *optarg;
-extern int optind, opterr, optopt;
+//extern char *optarg;
+//extern int optind, opterr, optopt;
 
 // Datatype for floppy disk access
 #ifdef __CYGWIN__

@@ -1,4 +1,6 @@
 epslin
+epslin.exe
 *.iso
 *.img
 *.efe
+fdrawcmd.h
