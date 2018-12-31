@@ -25,20 +25,13 @@
 //  TO COMPILE:
 //  ===========
 //
-//  Linux
-//  -----
+//  Linux /  Mac OS X 
+//  ------------------
 //
 //    Just type:
 //
 //      gcc EpsLin_v1.44.c -o epslin
 //
-//  Mac OS X 
-//  ---------
-//
-//    In OSX two header files (fd.h & frderg.h) should be in the same folder
-//  
-//      gcc EpsLin_v1.44.c -o epslin
-// 
 //  Windows
 //  -------
 //
@@ -62,15 +55,6 @@
 //
 //  HISTORY
 //  =======
-//
-// [FUTURE..]
-//        - Optional "allowed" devices list to minimize
-//          unintentional writes to devices like system
-//          hard disk etc.. for Format and ImageCopy
-//          THIS COULD SAVE YOUR DAY (or even two)..!
-//        - Check mode and only efe erase/put use the
-//          'I' write to check if 's' media type..
-//        - Use 's' media type in Get and in GetFat/SetFat
 //
 //  v.1.44:
 //        - Mac OSX support
@@ -230,8 +214,21 @@
 //#include <linux/fd.h>
 //#include <linux/fdreg.h>
 
-#include "fd.h"
-#include "fdreg.h"
+// Floppy controller related stuff - from linux/fd.h
+
+#define FDRAWCMD _IO(2, 0x58)
+#define FDSETPRM _IOW(2, 0x42, struct floppy_struct) 
+
+struct floppy_struct {
+	unsigned int	size,	sect, head,	track, stretch;
+	unsigned char	gap, rate, spec1,	fmt_gap; const char	* name;
+};
+struct floppy_raw_cmd {
+	unsigned int flags; int *data; char *kernel_data; 
+	struct floppy_raw_cmd *next; long length, phys_length; int buffer_length; 
+	unsigned char rate, cmd_count, cmd[16], reply_count, reply[16];
+	int track, resultcode, reserved1, reserved2;
+};
 
 #define O_BINARY 0 // In windows open is set to binary mode       \
                    // In linux this is not defined so set it to 0 \
