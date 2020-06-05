@@ -874,11 +874,11 @@ void PrintDir(unsigned char Efe[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
   if (printmode == HUMAN_READABLE)
   {
     printf("------+----------+--------------+---------+---------------------------------+\n");
-    printf(" Used:  %23d Blocks    |  Used: %16ld Bytes   |\n", used_blks, (unsigned long)(used_blks)*512);
-    printf(" Free:  %23d Blocks    |  Free: %16ld Bytes   |\n", free_blks, (unsigned long)(free_blks)*512);
+    printf(" Used:  %23d Blocks    |  Used: %16lu Bytes   |\n", used_blks, (unsigned long)(used_blks)*512);
+    printf(" Free:  %23d Blocks    |  Free: %16lu Bytes   |\n",(unsigned long) free_blks, (unsigned long)(free_blks)*512);
     printf("----------------------------------------------------------------------------+\n");
-    //printf(" Total: %23d Blocks    |  Total:%16ld Bytes   |\n", free_blks+used_blks, (unsigned long) (free_blks+used_blks)*512);
-    //printf("----------------------------------------------------------------------------+\n\n");
+    printf(" Total: %23d Blocks    |  Total:%16lu Bytes   |\n", free_blks+used_blks, (unsigned long) (free_blks+used_blks)*512);
+    printf("----------------------------------------------------------------------------+\n\n");
   }
 }
 
@@ -1219,10 +1219,13 @@ unsigned int GetFatEntry(char media_type, unsigned char *DiskFAT, int file, unsi
   fatsect = (int)block / 170;
   fatpos = block % 170;
 
+  //printf("GetFatEntry");
+  //fflush(stdout);
+
   if (media_type == 'f')
   {
     // FILE ACCESS
-#ifdef __CYGWIN__
+#ifdef __CYGWINN__
     // To get /dev/scd work...
     {
       unsigned char tmp_buff[512];
@@ -1252,7 +1255,7 @@ unsigned int GetFatEntry(char media_type, unsigned char *DiskFAT, int file, unsi
 /////////////////////
 // PutFatEntry
 int PutFatEntry(char media_type, unsigned char *DiskFAT, int file,
-                unsigned int block, unsigned int fatval)
+                unsigned int block, unsigned int fatval, unsigned char *temp_mem)
 {
   unsigned int fatsect, fatpos, tmp;
   unsigned char FatEntry[3];
@@ -1263,6 +1266,15 @@ int PutFatEntry(char media_type, unsigned char *DiskFAT, int file,
   FatEntry[2] = fatval & 0x000000FF;
   FatEntry[1] = (fatval >> 8) & 0x000000FF;
   FatEntry[0] = (fatval >> 16) & 0x000000FF;
+
+  if(temp_mem != NULL) {
+
+    temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3)    ] = FatEntry[0];
+    temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3) + 1] = FatEntry[1];
+    temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3) + 2] = FatEntry[2];
+
+    return(OK);
+  }
 
   if (media_type == 'f')
   {
@@ -2773,6 +2785,10 @@ int ReadBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block
   unsigned int end_sector, end_head, end_track;
   unsigned int end_block, cur_block, nsect = 0;
   unsigned char tmp_buffer[BLOCK_SIZE * 20];
+
+  //printf("ReadBlocks");
+  //fflush(stdout);
+
 #ifdef __CYGWIN__
   unsigned int i, count, num_of_blocks;
   unsigned int pre_blocks;
@@ -2787,7 +2803,7 @@ int ReadBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block
   switch (media_type)
   {
   case 'f':
-#ifdef __CYGWIN__
+#ifdef __CYGWINN__
   case 's':
 
     num_of_blocks = length;
@@ -2928,6 +2944,9 @@ int WriteBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_bloc
   int end_sector, end_head, end_track;
   unsigned int end_block, cur_block, nsect = 0, num_of_sectors, start_sector, tmp;
   unsigned char tmp_buffer[BLOCK_SIZE * 20];
+
+  printf("WriteBlocks");
+  fflush(stdout);
 
   switch (media_type)
   {
@@ -3796,6 +3815,8 @@ int PutEFE(
           {
             // FILE ACCESS
 
+            mem_pointer = malloc(BLOCK_SIZE * efe_blks);
+
             // Copy Blocks
             lseek(out, BLOCK_SIZE * free_start, SEEK_SET);
             for (j = 0; j < efe_blks; j++)
@@ -3810,9 +3831,21 @@ int PutEFE(
                 memcpy(Data, MemData, BLOCK_SIZE);
                 MemData = MemData + BLOCK_SIZE;
               }
-
-              write(out, Data, BLOCK_SIZE);
+              memcpy(mem_pointer + j * BLOCK_SIZE, Data, BLOCK_SIZE);
             }
+            
+            int k;
+            int num = 256;
+            int count =  efe_blks / num;
+            int reminder = efe_blks % num;
+
+            for(k=0; k<count; k++)
+              write(out, mem_pointer + (k*BLOCK_SIZE*num) , BLOCK_SIZE * num);
+            
+            if(reminder> 0)
+              write(out, mem_pointer + (k*BLOCK_SIZE*num) , BLOCK_SIZE * reminder);
+
+            free(mem_pointer);
           }
           else
           {
@@ -3835,13 +3868,34 @@ int PutEFE(
           }
 
           // Write FAT
+          unsigned int tempFatSize;
+          unsigned int fatval, blk_count, k;
+          unsigned int start_fat_sect, start_fat_pos, end_fat_sect, end_fat_pos;
+          
+          start_fat_sect = (int)free_start / 170;
+          start_fat_pos = free_start % 170;
+
+          end_fat_sect = (int) (free_start + efe_blks) / 170;
+          end_fat_pos = (free_start + efe_blks) % 170;
+
+          tempFatSize = (end_fat_sect - start_fat_sect + 1) * BLOCK_SIZE;
+          mem_pointer = malloc(tempFatSize);
+
+          lseek(out, (FAT_START_BLOCK + start_fat_sect) * BLOCK_SIZE, SEEK_SET);
+          read(out, mem_pointer, tempFatSize);
+    
           for (j = free_start; j < free_start + efe_blks - 1; j++)
           {
-            PutFatEntry(media_type, DiskFAT, out, j, j + 1);
+            PutFatEntry(media_type, DiskFAT, out, j - start_fat_sect * 170, j + 1, mem_pointer);
           }
-
+          
           // Mark the end-of-efe
-          PutFatEntry(media_type, DiskFAT, out, j, 1);
+          PutFatEntry(media_type, DiskFAT, out, j - start_fat_sect * 170, 1, mem_pointer);
+
+          lseek(out, (FAT_START_BLOCK + start_fat_sect) * BLOCK_SIZE, SEEK_SET);
+          write(out, mem_pointer, tempFatSize);
+          
+          free(mem_pointer);
 
           efe_start_block = free_start;
           first_cont_blks = efe_blks;
@@ -3859,8 +3913,12 @@ int PutEFE(
     // If there was no enough contiguos blocks, the efe must be
     // saved using the space fragments available.. :-(
 
+    printf("\n SECOND PASS? i=%d  totalblks=%d\n", i, total_blks);
+
     if (i == total_blks)
     {
+      printf("\n SECOND PASS!! \n");
+
       efe_start_block = first_free_block;
       prev_block = 0;
       free_cnt = 0;
@@ -3884,7 +3942,7 @@ int PutEFE(
 
           if (prev_block != 0)
           {
-            PutFatEntry(media_type, DiskFAT, out, prev_block, i);
+            PutFatEntry(media_type, DiskFAT, out, prev_block, i, NULL);
           }
           prev_block = i;
           free_cnt++;
@@ -3955,7 +4013,7 @@ int PutEFE(
       }
 
       // Mark the end-of-efe
-      PutFatEntry(media_type, DiskFAT, out, i - 1, 1);
+      PutFatEntry(media_type, DiskFAT, out, i - 1, 1, NULL);
     }
 
     // Update disk-free field
@@ -4183,11 +4241,11 @@ int EraseEFEs(char media_type, char image_type, FD_HANDLE fd,
 
     while ((i = GetFatEntry(media_type, DiskFAT, out, start)) != 1)
     {
-      PutFatEntry(media_type, DiskFAT, out, start, 0);
+      PutFatEntry(media_type, DiskFAT, out, start, 0, NULL);
       start = i;
     }
     // .. and last entry (ie. stopmark '1')
-    PutFatEntry(media_type, DiskFAT, out, start, 0);
+    PutFatEntry(media_type, DiskFAT, out, start, 0, NULL);
 
     // Clear Dir entry
     for (i = 0; i < 26; i++)
@@ -4976,6 +5034,7 @@ void CheckMedia(char media_type, FD_HANDLE fd, int file, int check_level)
 #endif
   }
 
+  printf("media_type:%c", media_type);
   printf("\nFile/Device size: %ld bytes (%ld blocks)\n\n", file_size, file_size / BLOCK_SIZE);
 
   //ID-Block
@@ -5327,6 +5386,7 @@ int main(int argc, char **argv)
     case 'C': // ** CHECK MEDIA **
       //printf("argv[optind=%d]=%s,argc=%d\n",optind,argv[optind],argc);
       GetMedia(argv[optind], argc, &media_type, &image_type, &nsect, &trk_size, &fd, in_file, &in);
+      media_type = 'f';
       if (optarg == NULL)
         check_level = 0;
       else
@@ -5424,8 +5484,8 @@ int main(int argc, char **argv)
 
   if (mode == FORMAT)
   {
-    if (confirm_operation)
-      Confirm();
+    //if (confirm_operation)
+    //  Confirm();
     FormatMedia(argv, argc, optind, format_arg, DiskLabel);
   }
 
