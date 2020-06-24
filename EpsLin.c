@@ -1191,16 +1191,17 @@ int PutFatEntry(char media_type, unsigned char *DiskFAT, int file,
   FatEntry[1] = (fatval >> 8) & 0x000000FF;
   FatEntry[0] = (fatval >> 16) & 0x000000FF;
 
-  // Use provided memory buffer for FAT entry
-  if(temp_mem != NULL) {
-    temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3)    ] = FatEntry[0];
-    temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3) + 1] = FatEntry[1];
-    temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3) + 2] = FatEntry[2];
-    return(OK);
-  }
-
   if(media_type=='f') {
     // file access
+
+    // Use provided memory buffer for FAT entry
+    if(temp_mem != NULL) {
+      temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3)    ] = FatEntry[0];
+      temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3) + 1] = FatEntry[1];
+      temp_mem[(fatsect * BLOCK_SIZE + fatpos * 3) + 2] = FatEntry[2];
+      return(OK);
+    }
+
     lseek(file,(FAT_START_BLOCK+fatsect)*BLOCK_SIZE+fatpos*3, SEEK_SET);
     write(file,FatEntry,3);
     return(OK);
@@ -3232,6 +3233,46 @@ void SaveDirBlocks(char media_type, FD_HANDLE fd, unsigned char *DiskFAT, int fi
   }
 }
 
+//////////////////////////////////////////////
+// WriteFATBlocks - write continuous FAT block  
+void WriteFATBlocks(
+  char media_type, 
+  unsigned char *DiskFAT, 
+  int out, 
+  unsigned int start, 
+  unsigned int size, 
+  int erase
+  )
+{
+
+  unsigned int i, tempFatSize, start_fat_sect, start_fat_pos, end_fat_sect, end_fat_pos;
+  unsigned char *mem_pointer;
+
+  start_fat_sect = (int)start / 170;
+  start_fat_pos = start % 170;
+
+  end_fat_sect = (int)(start + size) / 170;
+  end_fat_pos = (start + size) % 170;
+
+  tempFatSize = (end_fat_sect - start_fat_sect + 1) * BLOCK_SIZE;
+  mem_pointer = malloc(tempFatSize);
+
+  lseek(out, (FAT_START_BLOCK + start_fat_sect) * BLOCK_SIZE, SEEK_SET);
+  read(out, mem_pointer, tempFatSize);
+
+  for (i = start; i < start + size - 1; i++)
+  {
+    PutFatEntry(media_type, DiskFAT, out, i - start_fat_sect * 170, erase ? 0 : i + 1, mem_pointer);
+  }
+
+  // Mark the end-of-efe
+  PutFatEntry(media_type, DiskFAT, out, i - start_fat_sect * 170, erase ? 0 : 1, mem_pointer);
+
+  lseek(out, (FAT_START_BLOCK + start_fat_sect) * BLOCK_SIZE, SEEK_SET);
+  write(out, mem_pointer, tempFatSize);
+
+  free(mem_pointer);
+}
 
 /////////////////////////////
 // GetEFEs
@@ -3244,8 +3285,7 @@ void SaveDirBlocks(char media_type, FD_HANDLE fd, unsigned char *DiskFAT, int fi
 // extracted properly under Windows during FILE access.
 //
 
-int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE],
-	    char *process_EFE, unsigned char *DiskFAT)
+int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], char *process_EFE, unsigned char *DiskFAT, int printmode)
 {
   int out;
   unsigned int i,j,k, size, cont, start, fatval, bp;
@@ -3261,17 +3301,17 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
     if(process_EFE[j] == 0) continue;
 
     // Get file type for current entry being processed -- skip if entry cannot be exported to EFE
-	type=EFE[j][1];
+	  type=EFE[j][1];
     if(type == 0) continue;						// skip Unused/Blank/Empty
-	if(type == 2) continue;						// skip Sub-Directory
-	if(type == 8) continue;						// skip Pointer to Parent Directory
-	if((type > 9) && (type < 23)) continue;		// skip SD-1/VFX-SD entries, however implausible...
-	if(type > 34) continue;						// skip any entry which is definitely out-of-range
+	  if(type == 2) continue;						// skip Sub-Directory
+	  if(type == 8) continue;						// skip Pointer to Parent Directory
+	  if((type > 9) && (type < 23)) continue;		// skip SD-1/VFX-SD entries, however implausible...
+	  if(type > 34) continue;						// skip any entry which is definitely out-of-range
 
     size =(unsigned int)  ((EFE[j][14] << 8) + EFE[j][15]);
     cont =(unsigned int)  ((EFE[j][16] << 8) + EFE[j][17]);
     start=(unsigned long) ((EFE[j][18] << 24) + (EFE[j][19] << 16)
-			   +(EFE[j][20] <<8 ) +  EFE[j][21]);
+		  	                  +(EFE[j][20] <<8 ) +  EFE[j][21]);
 
     //Name
     for(k=0;k<12;k++) {
@@ -3279,8 +3319,8 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
     }
     name[12]=0;
 
-	// Correct any "invalid" Ensoniq characters in EFE name so that
-	// the operating system will not choke.
+	  // Correct any "invalid" Ensoniq characters in EFE name so that
+	  // the operating system will not choke.
     DosName(dosname,name);
 
     // Add type (and multi-file) prefix to filename.
@@ -3323,56 +3363,57 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
 
     for(i=59;i<BLOCK_SIZE;i++) Header[i]=0;
 
-	// Open for reading and writing (O_RDWR).
+	  // Open for reading and writing (O_RDWR).
     if((out=open(dosname,O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS)) < 0) {
       EEXIT((stderr,"ERROR: Couldn't create '%s' to write EFE! \n",dosname));
     }
 
-	// Write Giebler specific EFE header (not actual Ensoniq data).
+	  // Write Giebler specific EFE header (not actual Ensoniq data).
     write(out,Header,BLOCK_SIZE);
 
-	// Report which EFE is being handled.
-    printf("\rProcessing [%s]... \n",name);fflush(stdout);
+	  // Report which EFE is being handled.
+    if(printmode == 0)
+      printf("\rProcessing [%s]... \n",name);fflush(stdout);
 
     // Stage 1: Copy all contiguous blocks within the EFE.
     if(media_type == 'f') {
-		// FILE access mode
-		for(i=0;i<cont;i++) {
-			// One block at a time, sequentially.
-			ReadBlocks(media_type,fd,in,start+i,1,Data);
-			write(out,Data,BLOCK_SIZE);
-		} // end copying contiguous blocks in FILE mode
-	} else {
-		// DISK access mode
-		// Create a buffer which can hold the entire range of contiguous blocks.
-		mem_pointer=malloc(BLOCK_SIZE*cont);
-		// Quit on error if buffer could not be created.
-		if(mem_pointer == NULL) EEXIT((stderr,"ERROR: Couldn't allocate memory!!!! \n"));
-		// Read *all* contiguous blocks into buffer.
-		ReadBlocks(media_type,fd,in,start,cont,mem_pointer);
-		// Write out the contiguous blocks which were stored into buffer.
-		write(out,mem_pointer,BLOCK_SIZE*cont);
-	} // end copying contiguous blocks in DISK mode
+		  // FILE access mode
+		  for(i=0;i<cont;i++) {
+			  // One block at a time, sequentially.
+			  ReadBlocks(media_type,fd,in,start+i,1,Data);
+			  write(out,Data,BLOCK_SIZE);
+		  } // end copying contiguous blocks in FILE mode
+	  } else {
+		  // DISK access mode
+		  // Create a buffer which can hold the entire range of contiguous blocks.
+		  mem_pointer=malloc(BLOCK_SIZE*cont);
+		  // Quit on error if buffer could not be created.
+		  if(mem_pointer == NULL) EEXIT((stderr,"ERROR: Couldn't allocate memory!!!! \n"));
+		  // Read *all* contiguous blocks into buffer.
+		  ReadBlocks(media_type,fd,in,start,cont,mem_pointer);
+		  // Write out the contiguous blocks which were stored into buffer.
+		  write(out,mem_pointer,BLOCK_SIZE*cont);
+	  } // end copying contiguous blocks in DISK mode
 
-	// Stage 2: Contiguous blocks have all been read, so now get
+	  // Stage 2: Contiguous blocks have all been read, so now get
     // any remaining blocks which were not contiguous.
 
-	// All FAT entries which belonged to the contiguous blocks can
-	// just be skipped over since those blocks have already been read.
+	  // All FAT entries which belonged to the contiguous blocks can
+	  // just be skipped over since those blocks have already been read.
 
-	// FAT block pointer -- starting block + number of contiguous blocks - 1
-	// In other words: This points to the last FAT entry for the block at
-	// the end of the *contiguous* range, but not necessary the end of EFE.
+	  // FAT block pointer -- starting block + number of contiguous blocks - 1
+	  // In other words: This points to the last FAT entry for the block at
+	  // the end of the *contiguous* range, but not necessary the end of EFE.
     bp=start+cont-1;
 
-	// Get the FAT entry for the last contiguous block in the EFE.
+	  // Get the FAT entry for the last contiguous block in the EFE.
     fatval=GetFatEntry(media_type,DiskFAT,in,bp);
 
-	// A code of '001' signifies block is both used and also the last
-	// block in the FAT chain. In other words: EOF -- end of file.
-	// If the last FAT entry in the contiguous range was also the EOF
-	// flag then stage 2 can simply be skipped because there are no
-	// non-contiguous blocks in the EFE at all.
+	  // A code of '001' signifies block is both used and also the last
+	  // block in the FAT chain. In other words: EOF -- end of file.
+	  // If the last FAT entry in the contiguous range was also the EOF
+	  // flag then stage 2 can simply be skipped because there are no
+	  // non-contiguous blocks in the EFE at all.
     if(fatval != 1) {
 		if(media_type == 'f') {
 			// FILE ACCESS -- non-contiguous block handling
@@ -3427,6 +3468,8 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
 			} // end of non-contiguous disk access -- '001' FAT entry found
 		} // end of else
 	} // skip over stage 2 -- EFE has only contiguous blocks
+
+  if(printmode == 0)
     printf("\r                                                     ");
 	// Close newly created EFE file.
 	close(out);
@@ -3745,6 +3788,9 @@ int PutEFE(
 
             free(mem_pointer);
 
+            // Write FAT
+            WriteFATBlocks(media_type, DiskFAT, out, free_start, EFE_blks, 0);
+
 	        } else {
 	          // DISK ACCESS
 	          mem_pointer=malloc(BLOCK_SIZE*EFE_blks);
@@ -3758,42 +3804,15 @@ int PutEFE(
 
 	          WriteBlocks(media_type,fd,out,free_start,EFE_blks,mem_pointer);
 	          free(mem_pointer);
-	        }
+	        
+            // Write FAT
+	          for(j=free_start; j<free_start+EFE_blks-1; j++) {
+	            PutFatEntry(media_type,DiskFAT,out, j,j+1, NULL);
+	          }
 
-      	  // Write FAT
-	        //for(j=free_start; j<free_start+EFE_blks-1; j++) {
-	        //  PutFatEntry(media_type,DiskFAT,out, j,j+1, NULL);
-	        //}
-
-      	  // Mark the end-of-EFE
-	        //PutFatEntry(media_type,DiskFAT,out, j,1, NULL);
-
-          unsigned int tempFatSize, start_fat_sect, start_fat_pos, end_fat_sect, end_fat_pos;
-          
-          start_fat_sect = (int)free_start / 170;
-          start_fat_pos = free_start % 170;
-
-          end_fat_sect = (int) (free_start + EFE_blks) / 170;
-          end_fat_pos = (free_start + EFE_blks) % 170;
-
-          tempFatSize = (end_fat_sect - start_fat_sect + 1) * BLOCK_SIZE;
-          mem_pointer = malloc(tempFatSize);
-
-          lseek(out, (FAT_START_BLOCK + start_fat_sect) * BLOCK_SIZE, SEEK_SET);
-          read(out, mem_pointer, tempFatSize);
-    
-          for (j = free_start; j < free_start + EFE_blks - 1; j++)
-          {
-            PutFatEntry(media_type, DiskFAT, out, j - start_fat_sect * 170, j + 1, mem_pointer);
+      	    // Mark the end-of-EFE
+	          PutFatEntry(media_type,DiskFAT,out, j,1, NULL);
           }
-          
-          // Mark the end-of-efe
-          PutFatEntry(media_type, DiskFAT, out, j - start_fat_sect * 170, 1, mem_pointer);
-
-          lseek(out, (FAT_START_BLOCK + start_fat_sect) * BLOCK_SIZE, SEEK_SET);
-          write(out, mem_pointer, tempFatSize);
-          
-          free(mem_pointer);
 
       	  EFE_start_block = free_start;
 	        first_cont_blks = EFE_blks;
@@ -4025,7 +4044,6 @@ int PutEFE(
 
 }
 
-
 /////////////////////////////
 // EraseEFEs
 int EraseEFEs(char media_type, char image_type, FD_HANDLE fd,
@@ -4065,45 +4083,52 @@ int EraseEFEs(char media_type, char image_type, FD_HANDLE fd,
     switch (type)
       {
       case 0: // Empty
-	continue;
+	      continue;
 
       case 2: 	// Sub dir
-	if(EFE[j][15] > 0) {
-	  fprintf(stderr, "\nIDX %-2d: Can't erase directory! Directory not empty. \n\n",j);
-	  continue;
-	}
-	size = 2;
-	break;
+	      if(EFE[j][15] > 0) {
+	        fprintf(stderr, "\nIDX %-2d: Can't erase directory! Directory not empty. \n\n",j);
+	        continue;
+	      }
+	      size = 2;
+	      break;
 
       case 8: 	// Pointer to 'root'
-	fprintf(stderr, "\nIDX %-2d: Can't erase link to parent dir! \n\n",j);
-	continue;
+	      fprintf(stderr, "\nIDX %-2d: Can't erase link to parent dir! \n\n",j);
+	      continue;
 
-	// If erasing os, clear version field
+	    // If erasing os, clear version field
       case 1:
       case 27:
       case 32:
-	OS = 0;
+	      OS = 0;
 
       default:
-	size =(unsigned int)  ((EFE[j][14] << 8) + EFE[j][15]);
+	      size =(unsigned int)  ((EFE[j][14] << 8) + EFE[j][15]);
       }
 
     cont =(unsigned int)  ((EFE[j][16] << 8) + EFE[j][17]);
     start=(unsigned long) ((EFE[j][18] << 24) + (EFE[j][19] << 16)
 			   +(EFE[j][20] <<8 ) +  EFE[j][21]);
 
+    printf("cont: %ld start: %ld\n", cont, start);
+
     // Calculate 'disk-free'
     *free_blks = (*free_blks) + size;
 
     // Clear FAT entries
-
-    while((i=GetFatEntry(media_type,DiskFAT,out,start)) != 1) {
+    
+    if(media_type=='f' && cont == size) { 
+      // Use buffering if cont blocks 
+      WriteFATBlocks(media_type, DiskFAT, out, start, cont, 1);
+    } else {
+      while((i=GetFatEntry(media_type,DiskFAT,out,start)) != 1) {
+        PutFatEntry(media_type,DiskFAT,out,start,0, NULL);
+        start=i;
+      }
+      // .. and last entry (ie. stopmark '1')
       PutFatEntry(media_type,DiskFAT,out,start,0, NULL);
-      start=i;
     }
-    // .. and last entry (ie. stopmark '1')
-    PutFatEntry(media_type,DiskFAT,out,start,0, NULL);
 
     // Clear Dir entry
     for(i=0;i<26;i++) {
@@ -5309,7 +5334,7 @@ int main(int argc, char **argv)
       exit(OK);
 
     case GET:   // Get EFEs
-      GetEFEs(media_type, fd, in, EFE, process_EFE, DiskFAT);
+      GetEFEs(media_type, fd, in, EFE, process_EFE, DiskFAT, printmode);
       break;
 
     case PUT:   // Put EFEs
