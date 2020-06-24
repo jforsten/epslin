@@ -3488,31 +3488,30 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
 //
 
 int PutEFE(
-	    char *process_EFE,
-	    unsigned char start_idx,
-	    unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE],
-	    char media_type,
-	    char image_type,
-	    char *image_file,
-	    char **EFE_files,
-	    int optind,
-	    char *orig_image_name,
-	    unsigned int dir_start,
-	    unsigned int dir_cont,
-	    unsigned int total_blks,
-	    unsigned int *free_blks,
-	    unsigned int fat_blks,
-	    FD_HANDLE fd,
-	    unsigned char *DiskFAT,
-	    unsigned char *DiskHdr,
-	    unsigned char *MemDataHdr,
-	    unsigned char *MemData
-	    )
+    char *process_EFE,
+    unsigned char start_idx,
+    unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE],
+    char media_type,
+    char image_type,
+    char *image_file,
+    char **EFE_files,
+    int optind,
+    char *orig_image_name,
+    unsigned int dir_start,
+    unsigned int dir_cont,
+    unsigned int total_blks,
+    unsigned int *free_blks,
+    unsigned int fat_blks,
+    FD_HANDLE fd,
+    unsigned char *DiskFAT,
+    unsigned char *DiskHdr,
+    unsigned char *MemDataHdr,
+    unsigned char *MemData)
 {
 
   int in, out;
   char in_file[FILENAME_MAX];
-  unsigned int idx,i,j,blks,start;
+  unsigned int idx, i, j, blks, start;
   unsigned char EFE_name[13], EFEData[EFE_SIZE], buffer[4], EFE_type, Data[BLOCK_SIZE];
   unsigned char *mem_pointer;
   unsigned int EFE_start_block, EFE_blks, first_free_block, first_cont_blks, prev_block;
@@ -3520,150 +3519,172 @@ int PutEFE(
   char **EFE_list;
 
 #ifdef __CYGWIN__
-  if(((media_type ==  'f') || (media_type ==  's')) && (MemData == NULL)) {
+  if (((media_type == 'f') || (media_type == 's')) && (MemData == NULL))
+  {
 #else // Linux
-  if((media_type ==  'f') && (MemData == NULL)) {
+  if ((media_type == 'f') && (MemData == NULL))
+  {
 #endif
     // FILE ACCESS
 
-    if((out=open(image_file, O_RDWR | O_BINARY)) < 0) {
-      EEXIT((stderr,"ERROR: Couldn't open image file '%s'. \n",image_file));
+    if ((out = open(image_file, O_RDWR | O_BINARY)) < 0)
+    {
+      EEXIT((stderr, "ERROR: Couldn't open image file '%s'. \n", image_file));
     }
     // skip over the image filename passed by the command-line to arrive at just EFE names
     optind++;
   }
 
   // Check if any EFE filenames were supplied by command-line at all -- if not then routine has nothing to do!
-  if(EFE_files[optind] == NULL) {
-	printf("Warning: Cannot put an EFE which has not been specified! \n");
-	return(ERR);
+  if (EFE_files[optind] == NULL)
+  {
+    printf("Warning: Cannot put an EFE which has not been specified! \n");
+    return (ERR);
   }
 
   // Allocate memory for EFE filenames array.
-  EFE_list = malloc(500 * sizeof(*EFE_list));			// 500 entries is hopefully enough for any circumstance -- kludge!
-  if(EFE_list == NULL) EEXIT((stderr,"ERROR: Couldn't allocate memory!!!! \n"));
-  int EFEindex=0;						// initialize an index for EFE filename listing
-  EFE_list[EFEindex]=NULL;				// initialize the first entry to NULL -- last entry always has to be NULL, so assume first will be last and only
+  EFE_list = malloc(500 * sizeof(*EFE_list)); // 500 entries is hopefully enough for any circumstance -- kludge!
+  if (EFE_list == NULL)
+    EEXIT((stderr, "ERROR: Couldn't allocate memory!!!! \n"));
+  int EFEindex = 0;          // initialize an index for EFE filename listing
+  EFE_list[EFEindex] = NULL; // initialize the first entry to NULL -- last entry always has to be NULL, so assume first will be last and only
 
   // PROCESS ALL EFEs
   //
   // Check for wildcard globbing, and process if found, otherwise use individual filenames from command-line.
   //
   // Copy the first EFE filename passed by command-line into another variable -- maybe a normal name, maybe a wildcard.
-  strcpy(in_file,EFE_files[optind]);
+  strcpy(in_file, EFE_files[optind]);
   // See if EFE filename is normal or a wildcard -- expands the wildcard to individual filename if applicable.
   // Remember: strcmp returns 0 when true rather than 1.
-  if( (strcasecmp(in_file,"ALL")==0) || (strcasecmp(in_file,"*.EFE")==0) || (strcasecmp(in_file,"*.EFA")==0) || (strcasecmp(in_file,"*.INS")==0) ) {
-	printf("Attempting to add all found EFE, EFA, and INS files... \n");
-	// Itemize all possible EFE, EFA, and INS files in current directory -- replaces wildcard argument with actual filenames
-	DIR *dp;							// structure representing a directory stream
-	struct dirent *entry;
-	dp = opendir ("./");				// opens a directory stream corresponding to local directory
-	if (dp != NULL)	{					// do the following if the local directory exists and can be accessed
-	// start directory parsing
-		while (entry=readdir (dp)) {
-			// d_name is filename for current file being examined in the directory
-			//
-			// Check if extension exists at all.
-			char *p;		// holds file extension of filename
-			if((p= (char *) rindex(entry->d_name,'.')) != NULL) {
-				// File extension exists, so see if it is one of the allowed types (EFE/EFA/INS).
-				p++;		// skip '.' to get only file extension
-				if( (strcasecmp(p,"efe") == 0) || (strcasecmp(p,"efa") == 0) || (strcasecmp(p,"ins") == 0) ) {
-					// Allocate enough memory for new filename string.
-					EFE_list[EFEindex] = malloc(strlen(entry->d_name) + 1); 	// + 1 for the '\0' character at the end of C-style strings
-					if(EFE_list[EFEindex] == NULL) EEXIT((stderr,"ERROR: Couldn't allocate memory!!!! \n"));
-					// Copy filename into newly allocated string.
-					strcpy(EFE_list[EFEindex],entry->d_name);					// add proper filename to EFE/EFA/INS input list
-					EFEindex++;													// go to next filename slot
-				}
-			} // end of file extension check
-		}
-		(void) closedir (dp);					// properly close directory
-	} // end of directory parsing
-	else								// do the follow if the local directory cannot be accessed
-		EEXIT((stderr,"ERROR: Couldn't open local directory. \n"));
+  if ((strcasecmp(in_file, "ALL") == 0) || (strcasecmp(in_file, "*.EFE") == 0) || (strcasecmp(in_file, "*.EFA") == 0) || (strcasecmp(in_file, "*.INS") == 0))
+  {
+    printf("Attempting to add all found EFE, EFA, and INS files... \n");
+    // Itemize all possible EFE, EFA, and INS files in current directory -- replaces wildcard argument with actual filenames
+    DIR *dp; // structure representing a directory stream
+    struct dirent *entry;
+    dp = opendir("./"); // opens a directory stream corresponding to local directory
+    if (dp != NULL)
+    { // do the following if the local directory exists and can be accessed
+      // start directory parsing
+      while (entry = readdir(dp))
+      {
+        // d_name is filename for current file being examined in the directory
+        //
+        // Check if extension exists at all.
+        char *p; // holds file extension of filename
+        if ((p = (char *)rindex(entry->d_name, '.')) != NULL)
+        {
+          // File extension exists, so see if it is one of the allowed types (EFE/EFA/INS).
+          p++; // skip '.' to get only file extension
+          if ((strcasecmp(p, "efe") == 0) || (strcasecmp(p, "efa") == 0) || (strcasecmp(p, "ins") == 0))
+          {
+            // Allocate enough memory for new filename string.
+            EFE_list[EFEindex] = malloc(strlen(entry->d_name) + 1); // + 1 for the '\0' character at the end of C-style strings
+            if (EFE_list[EFEindex] == NULL)
+              EEXIT((stderr, "ERROR: Couldn't allocate memory!!!! \n"));
+            // Copy filename into newly allocated string.
+            strcpy(EFE_list[EFEindex], entry->d_name); // add proper filename to EFE/EFA/INS input list
+            EFEindex++;                                // go to next filename slot
+          }
+        } // end of file extension check
+      }
+      (void)closedir(dp); // properly close directory
+    }                     // end of directory parsing
+    else                  // do the follow if the local directory cannot be accessed
+      EEXIT((stderr, "ERROR: Couldn't open local directory. \n"));
   } // end of wildcard globbing processing routine
-  else {
-  // No wildcards found, so copy all command-line filenames into EFE file list without alteration.
-	int copyIndex=optind;									// initialize an index for EFE filename copying
-    while(EFE_files[copyIndex] != NULL) {
-		// Allocate enough memory for new filename string.
-		EFE_list[EFEindex] = malloc(strlen(EFE_files[copyIndex]) + 1); 	// + 1 for the '\0' character at the end of C-style strings
-		if(EFE_list[EFEindex] == NULL) EEXIT((stderr,"ERROR: Couldn't allocate memory!!!! \n"));
-		strcpy(EFE_list[EFEindex],EFE_files[copyIndex]);				// copy command-line filename directly into EFE filelist
-		copyIndex++;													// advance to next command-line filename
-		EFEindex++;														// go to next filename slot
-	} // end while
-  } // end else
+  else
+  {
+    // No wildcards found, so copy all command-line filenames into EFE file list without alteration.
+    int copyIndex = optind; // initialize an index for EFE filename copying
+    while (EFE_files[copyIndex] != NULL)
+    {
+      // Allocate enough memory for new filename string.
+      EFE_list[EFEindex] = malloc(strlen(EFE_files[copyIndex]) + 1); // + 1 for the '\0' character at the end of C-style strings
+      if (EFE_list[EFEindex] == NULL)
+        EEXIT((stderr, "ERROR: Couldn't allocate memory!!!! \n"));
+      strcpy(EFE_list[EFEindex], EFE_files[copyIndex]); // copy command-line filename directly into EFE filelist
+      copyIndex++;                                      // advance to next command-line filename
+      EFEindex++;                                       // go to next filename slot
+    }                                                   // end while
+  }                                                     // end else
 
   // Always set the last file list entry to NULL -- will be the first *and* last entry if no valid files are found!
-  EFE_list[EFEindex]=NULL;
+  EFE_list[EFEindex] = NULL;
 
   // Reset filelist index back to start.
   EFEindex = 0;
 
   // KLUDGE!!!
-  while((MemData != NULL) || (EFE_list[EFEindex] != NULL)) {
+  while ((MemData != NULL) || (EFE_list[EFEindex] != NULL))
+  {
 
     // Starting at pos 'start_idx' !!
     // (It's quite a unusual to put other that OS or SubDir to idx 0)
-    for(idx= start_idx; idx<MAX_NUM_OF_DIR_ENTRIES; idx++) {
-      if(EFE[idx][1] == 0) break;
+    for (idx = start_idx; idx < MAX_NUM_OF_DIR_ENTRIES; idx++)
+    {
+      if (EFE[idx][1] == 0)
+        break;
     }
 
     process_EFE[idx] = 1;
 
-	// Produce an error if attempting to write a 39th entry to one directory.
-    if(idx==MAX_NUM_OF_DIR_ENTRIES) {
-      printf("\r                                         \r");fflush(stdout);
-	  // !!!! THIS APPEARS TO CORRUPT THE DISK WHEN WILDCARDS OR MULTIPLE EFES !!!!
-	  // !!!! ARE SPECIFIED, BUT NOT WHEN SINGLE EFES ARE SPECIFIED            !!!!
-	  // Write SystemBlocks to disk and free mem
-  	  // so that EFEs so far will be saved..
+    // Produce an error if attempting to write a 39th entry to one directory.
+    if (idx == MAX_NUM_OF_DIR_ENTRIES)
+    {
+      printf("\r                                         \r");
+      fflush(stdout);
+      // !!!! THIS APPEARS TO CORRUPT THE DISK WHEN WILDCARDS OR MULTIPLE EFES !!!!
+      // !!!! ARE SPECIFIED, BUT NOT WHEN SINGLE EFES ARE SPECIFIED            !!!!
+      // Write SystemBlocks to disk and free mem
+      // so that EFEs so far will be saved..
       //WriteBlocks(media_type,fd,out,0,5+fat_blks,DiskHdr);
-	  free(EFE_list);
-	  EFE_list=NULL;
-	  // !!!! THERE WAS A MAJOR BUG HERE WHEN DEALLOCATING--AT LEAST IN FILE MODE!
-	  // !!!! FREEING ALLOCATED MEMORY IS GOOD FORM BUT NOT CRUCIAL, SO LEAVE THIS
-	  // !!!! COMMENTED UNTIL THERE IS A PERFECT SOLUTION!
-	  // free(DiskHdr);
-	  printf("ERROR: Directory full! \n");
-	  return(ERR);
+      free(EFE_list);
+      EFE_list = NULL;
+      // !!!! THERE WAS A MAJOR BUG HERE WHEN DEALLOCATING--AT LEAST IN FILE MODE!
+      // !!!! FREEING ALLOCATED MEMORY IS GOOD FORM BUT NOT CRUCIAL, SO LEAVE THIS
+      // !!!! COMMENTED UNTIL THERE IS A PERFECT SOLUTION!
+      // free(DiskHdr);
+      printf("ERROR: Directory full! \n");
+      return (ERR);
     }
 
-    if(MemData == NULL) {
+    if (MemData == NULL)
+    {
       //EFE from file
       //=============
       // Attempts to open and also check that current file specified for EFE input exists.
-	  strcpy(in_file,EFE_list[EFEindex]);
-	  if((in=open(in_file, O_RDONLY | O_BINARY)) < 0) {
-		EEXIT((stderr,"ERROR: Couldn't open '%s' as an EFE input. \n",in_file));
-	  }
-
-	  // Check that EFE input file specified is actually a valid EFE/EFA/INS.
-	  if(IsEFE(&in, in_file) != OK) {
-		EEXIT((stderr,"ERROR: '%s' does not appear to be a valid Ensoniq file! \n",in_file));
-	  }
-
-      // Check and convert if 'Mac'-format :-P is found
-      if(ConvertMacFormat(&in, in_file) == OK) {
-		printf("Warning: Macintosh generated EFx file found. \n");
+      strcpy(in_file, EFE_list[EFEindex]);
+      if ((in = open(in_file, O_RDONLY | O_BINARY)) < 0)
+      {
+        EEXIT((stderr, "ERROR: Couldn't open '%s' as an EFE input. \n", in_file));
       }
 
-      lseek(in, (long) 0x32, SEEK_SET);
-      read(in,EFEData, EFE_SIZE);
+      // Check that EFE input file specified is actually a valid EFE/EFA/INS.
+      if (IsEFE(&in, in_file) != OK)
+      {
+        EEXIT((stderr, "ERROR: '%s' does not appear to be a valid Ensoniq file! \n", in_file));
+      }
 
-      lseek(in, (long) 0x12, SEEK_SET);
-      read(in,EFE_name,12);
-      EFE_name[12]='\0';
+      // Check and convert if 'Mac'-format :-P is found
+      if (ConvertMacFormat(&in, in_file) == OK)
+      {
+        printf("Warning: Macintosh generated EFx file found. \n");
+      }
 
+      lseek(in, (long)0x32, SEEK_SET);
+      read(in, EFEData, EFE_SIZE);
+
+      lseek(in, (long)0x12, SEEK_SET);
+      read(in, EFE_name, 12);
+      EFE_name[12] = '\0';
 
       EFE_blks = (EFEData[2] << 8) + EFEData[3];
       EFE_type = EFEData[0];
 
       // name
-      strcpy(&EFE[idx][2],EFE_name);
+      strcpy(&EFE[idx][2], EFE_name);
       // zero
       EFE[idx][0] = 0;
       // type
@@ -3674,47 +3695,54 @@ int PutEFE(
       // MultiFile index
       EFE[idx][22] = EFEData[8];
       // empty
-      EFE[idx][23] = 0; EFE[idx][24] = 0; EFE[idx][25] = 0;
+      EFE[idx][23] = 0;
+      EFE[idx][24] = 0;
+      EFE[idx][25] = 0;
 
       // If EFE is OS, get OS version
       switch (EFE_type)
-		{
-		case 1:  // EPS OS
-			lseek(in, EPS_OS_POS, SEEK_SET);
-			read(in,&OS,4);
-			break;
-		case 27: // E16 OS
-			lseek(in, E16_OS_POS, SEEK_SET);
-			read(in,&OS,4);
-			break;
-		case 32: // ASR OS
-			lseek(in, ASR_OS_POS, SEEK_SET);
-			read(in,&OS,4);
-			break;
-		default:
-			OS = 0;
-		}
+      {
+      case 1: // EPS OS
+        lseek(in, EPS_OS_POS, SEEK_SET);
+        read(in, &OS, 4);
+        break;
+      case 27: // E16 OS
+        lseek(in, E16_OS_POS, SEEK_SET);
+        read(in, &OS, 4);
+        break;
+      case 32: // ASR OS
+        lseek(in, ASR_OS_POS, SEEK_SET);
+        read(in, &OS, 4);
+        break;
+      default:
+        OS = 0;
+      }
 
       //Print progress info..
-      printf("\rProcessing [%s]... \n",EFE_name);fflush(stdout);
+      printf("\rProcessing [%s]... \n", EFE_name);
+      fflush(stdout);
 
       // Set reading point to start of the data
-      lseek(in,BLOCK_SIZE, SEEK_SET);
-
-    } else {
+      lseek(in, BLOCK_SIZE, SEEK_SET);
+    }
+    else
+    {
       // EFE from memory (ie. for ex. mkdir)
       //====================================
 
 #ifdef __CYGWIN__
-      if((media_type == 'f') || (media_type == 's')) {
+      if ((media_type == 'f') || (media_type == 's'))
+      {
 #else // Linux
-      if(media_type == 'f') {
+      if (media_type == 'f')
+      {
 #endif
-		// FILE ACCESS
-		// Image-file
-		if((out=open(image_file, O_RDWR | O_BINARY)) < 0) {
-			EEXIT((stderr,"ERROR: Couldn't open file '%s'. \n",image_file));
-		}
+        // FILE ACCESS
+        // Image-file
+        if ((out = open(image_file, O_RDWR | O_BINARY)) < 0)
+        {
+          EEXIT((stderr, "ERROR: Couldn't open file '%s'. \n", image_file));
+        }
       }
 
       // Copy header to EFE (ie. make dir entry)
@@ -3722,106 +3750,127 @@ int PutEFE(
 
       EFE_type = MemDataHdr[1];
 
-      if(EFE_type == 2) {
-		// set dir size temporary to 2
-		EFE_blks = 2;
-		// Root dir has info about parent's index in 'cont'
-		MemData[16] = 0;
-		MemData[17] = idx;
-      } else {
-		EFE_blks = (MemDataHdr[14] << 8) + MemDataHdr[15];
+      if (EFE_type == 2)
+      {
+        // set dir size temporary to 2
+        EFE_blks = 2;
+        // Root dir has info about parent's index in 'cont'
+        MemData[16] = 0;
+        MemData[17] = idx;
+      }
+      else
+      {
+        EFE_blks = (MemDataHdr[14] << 8) + MemDataHdr[15];
       }
     }
 
-    if(EFE_blks > *free_blks) {
-      EEXIT((stderr,"Not enough free space! %d needed, %d available. \n", EFE_blks, *free_blks));
+    if (EFE_blks > *free_blks)
+    {
+      EEXIT((stderr, "Not enough free space! %d needed, %d available. \n", EFE_blks, *free_blks));
     }
 
     first_free_block = 0;
     free_start = 0;
-    free_cnt=0;
+    free_cnt = 0;
 
     // First PASS - Check if enough contiguous blocks
-    for(i=FAT_START_BLOCK+fat_blks; i<total_blks; i++) {
-      if(GetFatEntry(media_type,DiskFAT,out,i) == 0) {
-	      //Free block found
-	      if(free_start == 0) {
-	        // Save the num. of the first free block found
-	        if(first_free_block == 0) {
-	          first_free_block = i;
-	        }
-	        free_start = i;
-	      }
-	      free_cnt++;
+    for (i = FAT_START_BLOCK + fat_blks; i < total_blks; i++)
+    {
+      if (GetFatEntry(media_type, DiskFAT, out, i) == 0)
+      {
+        //Free block found
+        if (free_start == 0)
+        {
+          // Save the num. of the first free block found
+          if (first_free_block == 0)
+          {
+            first_free_block = i;
+          }
+          free_start = i;
+        }
+        free_cnt++;
 
-      	if(free_cnt == EFE_blks) {
-	        // contiguous blocks found - write whole EFE from start_block
+        if (free_cnt == EFE_blks)
+        {
+          // contiguous blocks found - write whole EFE from start_block
 
-      	  if(media_type == 'f') {
-	          // FILE ACCESS
+          if (media_type == 'f')
+          {
+            // FILE ACCESS
 
             // Buffer for whole EFE data
             mem_pointer = malloc(BLOCK_SIZE * EFE_blks);
 
-      	    // Copy Blocks to buffer
-	          lseek(out, BLOCK_SIZE*free_start , SEEK_SET);
-	          for(j=0; j<EFE_blks; j++) {
+            // Copy Blocks to buffer
+            lseek(out, BLOCK_SIZE * free_start, SEEK_SET);
+            for (j = 0; j < EFE_blks; j++)
+            {
 
-      	      if(MemData == NULL) {
-			          read(in,Data,BLOCK_SIZE);
-	            } else {
-			          memcpy(Data, MemData, BLOCK_SIZE);
-			          MemData =  MemData  + BLOCK_SIZE;
-	            }
+              if (MemData == NULL)
+              {
+                read(in, Data, BLOCK_SIZE);
+              }
+              else
+              {
+                memcpy(Data, MemData, BLOCK_SIZE);
+                MemData = MemData + BLOCK_SIZE;
+              }
               memcpy(mem_pointer + j * BLOCK_SIZE, Data, BLOCK_SIZE);
-	          }
+            }
 
-            // Split writes to 256*512 byte chunks as SCSI2SD v6 USB access 
+            // Split writes to 256*512 byte chunks as SCSI2SD v6 USB access
             // cannot handle one big write operation..
-            int k, num = 256, count =  EFE_blks / num, reminder = EFE_blks % num;
+            int k, num = 256, count = EFE_blks / num, reminder = EFE_blks % num;
 
-            for(k=0; k<count; k++)
-              write(out, mem_pointer + (k*BLOCK_SIZE*num) , BLOCK_SIZE * num);
-            
-            if(reminder> 0)
-              write(out, mem_pointer + (k*BLOCK_SIZE*num) , BLOCK_SIZE * reminder);
+            for (k = 0; k < count; k++)
+              write(out, mem_pointer + (k * BLOCK_SIZE * num), BLOCK_SIZE * num);
+
+            if (reminder > 0)
+              write(out, mem_pointer + (k * BLOCK_SIZE * num), BLOCK_SIZE * reminder);
 
             free(mem_pointer);
 
             // Write FAT
             WriteFATBlocks(media_type, DiskFAT, out, free_start, EFE_blks, 0);
+          }
+          else
+          {
+            // DISK ACCESS
+            mem_pointer = malloc(BLOCK_SIZE * EFE_blks);
+            if (mem_pointer == NULL)
+              EEXIT((stderr, "ERROR: Couldn't allocate memory!!!! \n"));
 
-	        } else {
-	          // DISK ACCESS
-	          mem_pointer=malloc(BLOCK_SIZE*EFE_blks);
-	          if(mem_pointer == NULL) EEXIT((stderr,"ERROR: Couldn't allocate memory!!!! \n"));
+            if (MemData == NULL)
+            {
+              read(in, mem_pointer, BLOCK_SIZE * EFE_blks);
+            }
+            else
+            {
+              memcpy(mem_pointer, MemData, BLOCK_SIZE * EFE_blks);
+            }
 
-      	    if(MemData == NULL) {
-	            read(in,mem_pointer, BLOCK_SIZE*EFE_blks);
-	          } else {
-	            memcpy(mem_pointer, MemData, BLOCK_SIZE*EFE_blks);
-	          }
+            WriteBlocks(media_type, fd, out, free_start, EFE_blks, mem_pointer);
+            free(mem_pointer);
 
-	          WriteBlocks(media_type,fd,out,free_start,EFE_blks,mem_pointer);
-	          free(mem_pointer);
-	        
             // Write FAT
-	          for(j=free_start; j<free_start+EFE_blks-1; j++) {
-	            PutFatEntry(media_type,DiskFAT,out, j,j+1, NULL);
-	          }
+            for (j = free_start; j < free_start + EFE_blks - 1; j++)
+            {
+              PutFatEntry(media_type, DiskFAT, out, j, j + 1, NULL);
+            }
 
-      	    // Mark the end-of-EFE
-	          PutFatEntry(media_type,DiskFAT,out, j,1, NULL);
+            // Mark the end-of-EFE
+            PutFatEntry(media_type, DiskFAT, out, j, 1, NULL);
           }
 
-      	  EFE_start_block = free_start;
-	        first_cont_blks = EFE_blks;
-	        break;
-	      }
-
-	    } else {
-		    free_start = 0;
-		    free_cnt = 0;
+          EFE_start_block = free_start;
+          first_cont_blks = EFE_blks;
+          break;
+        }
+      }
+      else
+      {
+        free_start = 0;
+        free_cnt = 0;
       }
     }
 
@@ -3829,73 +3878,89 @@ int PutEFE(
     // If there was no enough contiguous blocks, the EFE must be
     // saved using the space fragments available.. :-(
 
-    if(i==total_blks) {
+    if (i == total_blks)
+    {
       EFE_start_block = first_free_block;
       prev_block = 0;
       free_cnt = 0;
       first_cont_blks = 0;
-      blks=0;
-      start=0;
+      blks = 0;
+      start = 0;
 
       // Split and write the EFE
-      for(i=first_free_block; (i<total_blks) || (free_cnt == EFE_blks); i++) {
+      for (i = first_free_block; (i < total_blks) || (free_cnt == EFE_blks); i++)
+      {
 
-	if(free_cnt == EFE_blks) break;
+        if (free_cnt == EFE_blks)
+          break;
 
-	// Try to find free space.
-	if(GetFatEntry(media_type,DiskFAT,out,i) == 0) {
+        // Try to find free space.
+        if (GetFatEntry(media_type, DiskFAT, out, i) == 0)
+        {
 
-	  if(start==0) start=i;
+          if (start == 0)
+            start = i;
 
-	  if(prev_block != 0) {
-	    PutFatEntry(media_type,DiskFAT,out, prev_block,i, NULL);
-	  }
-	  prev_block = i;
-	  free_cnt++;
-	  blks++;
-	} else {
-	  // Calculate contiguous blocks (first entry);
-	  if(first_cont_blks == 0) {
-	    first_cont_blks= i - first_free_block;
-	  }
+          if (prev_block != 0)
+          {
+            PutFatEntry(media_type, DiskFAT, out, prev_block, i, NULL);
+          }
+          prev_block = i;
+          free_cnt++;
+          blks++;
+        }
+        else
+        {
+          // Calculate contiguous blocks (first entry);
+          if (first_cont_blks == 0)
+          {
+            first_cont_blks = i - first_free_block;
+          }
 
-	  // process data in chunks (after found free space)
-	  if(blks!= 0) {
+          // process data in chunks (after found free space)
+          if (blks != 0)
+          {
 
-	    // Allocate mem
-	    mem_pointer=malloc(BLOCK_SIZE*blks);
-	    if(mem_pointer == NULL) EEXIT((stderr,"ERROR: Couldn't allocate memory!!!! \n"));
+            // Allocate mem
+            mem_pointer = malloc(BLOCK_SIZE * blks);
+            if (mem_pointer == NULL)
+              EEXIT((stderr, "ERROR: Couldn't allocate memory!!!! \n"));
 
-	    // Read data
-	    if(MemData == NULL) {
-	      read(in,mem_pointer,BLOCK_SIZE*blks);
-	    } else {
-	      memcpy(mem_pointer, MemData, BLOCK_SIZE*blks);
-	      MemData =  MemData  + BLOCK_SIZE*blks;
-	    }
+            // Read data
+            if (MemData == NULL)
+            {
+              read(in, mem_pointer, BLOCK_SIZE * blks);
+            }
+            else
+            {
+              memcpy(mem_pointer, MemData, BLOCK_SIZE * blks);
+              MemData = MemData + BLOCK_SIZE * blks;
+            }
 
-	    // Write data
-	    WriteBlocks(media_type, fd, out, start, blks, mem_pointer);
+            // Write data
+            WriteBlocks(media_type, fd, out, start, blks, mem_pointer);
 
-	    free(mem_pointer);
-	    start=0;
-	    blks=0;
-
-	  }
-
-	}
+            free(mem_pointer);
+            start = 0;
+            blks = 0;
+          }
+        }
       }
 
       // Allocate mem
-      mem_pointer=malloc(BLOCK_SIZE*blks);
-      if(mem_pointer == NULL) EEXIT((stderr,"ERROR: Couldn't allocate memory!!!! \n"));
+      mem_pointer = malloc(BLOCK_SIZE * blks);
+      if (mem_pointer == NULL)
+        EEXIT((stderr, "ERROR: Couldn't allocate memory!!!! \n"));
 
       // Read data
-      if(MemData == NULL) {
-		read(in,mem_pointer,BLOCK_SIZE*blks);
-      } else {
-		memcpy(mem_pointer, MemData, BLOCK_SIZE*blks);
-		MemData =  MemData  + BLOCK_SIZE*blks;
+      if (MemData == NULL)
+      {
+        read(in, mem_pointer, BLOCK_SIZE * blks);
+      }
+      else
+      {
+        memcpy(mem_pointer, MemData, BLOCK_SIZE * blks);
+        MemData = MemData + BLOCK_SIZE * blks;
       }
 
       // Write data
@@ -3903,145 +3968,160 @@ int PutEFE(
 
       free(mem_pointer);
 
-
-      if(i==total_blks) {
-		EEXIT((stderr,"ERROR: Image/disk has a corrupted FAT!! \n"));
+      if (i == total_blks)
+      {
+        EEXIT((stderr, "ERROR: Image/disk has a corrupted FAT!! \n"));
       }
 
       // Mark the end-of-EFE
-      PutFatEntry(media_type,DiskFAT,out, i-1,1, NULL);
+      PutFatEntry(media_type, DiskFAT, out, i - 1, 1, NULL);
     }
 
     // Update disk-free field
     *free_blks = (*free_blks) - EFE_blks;
     buffer[0] = ((*free_blks) >> 24) & 0x000000ff; // MSB
     buffer[1] = ((*free_blks) >> 16) & 0x000000ff;
-    buffer[2] = ((*free_blks) >>  8) & 0x000000ff;
-    buffer[3] =  (*free_blks)        & 0x000000ff; // LSB
+    buffer[2] = ((*free_blks) >> 8) & 0x000000ff;
+    buffer[3] = (*free_blks) & 0x000000ff; // LSB
 
-    if(media_type=='f') {
+    if (media_type == 'f')
+    {
       // FILE ACCESS
-      lseek(out, OS_BLOCK*BLOCK_SIZE, SEEK_SET);
-      write(out,buffer,4);
+      lseek(out, OS_BLOCK * BLOCK_SIZE, SEEK_SET);
+      write(out, buffer, 4);
 
       // If OS, update OS-version
-      if(OS != 0) {
-		write(out,&OS,4);
+      if (OS != 0)
+      {
+        write(out, &OS, 4);
       }
-
-    } else {
+    }
+    else
+    {
       // DISK ACCESS
-      memcpy(DiskHdr+OS_BLOCK*BLOCK_SIZE,buffer,4);
+      memcpy(DiskHdr + OS_BLOCK * BLOCK_SIZE, buffer, 4);
 
       // If OS, update OS-version
-      if(OS != 0) {
-		memcpy(DiskHdr+OS_BLOCK*BLOCK_SIZE+4,&OS,4);
+      if (OS != 0)
+      {
+        memcpy(DiskHdr + OS_BLOCK * BLOCK_SIZE + 4, &OS, 4);
       }
     }
 
     // Complete DirEntry
 
     // size in blocks
-    if(EFE_type == 2) {
+    if (EFE_type == 2)
+    {
       // dir's size = num of files ( = 0 when created)
       EFE[idx][14] = 0;
       EFE[idx][15] = 0;
-    } else {
-      EFE[idx][14] = (unsigned char) (EFE_blks >> 8) & 0xFF;
-      EFE[idx][15] = (unsigned char) (EFE_blks & 0xFF);
+    }
+    else
+    {
+      EFE[idx][14] = (unsigned char)(EFE_blks >> 8) & 0xFF;
+      EFE[idx][15] = (unsigned char)(EFE_blks & 0xFF);
     }
 
     // contiguous blocks
-    EFE[idx][16] = (unsigned char) (first_cont_blks >> 8);
-    EFE[idx][17] = (unsigned char) first_cont_blks & 0x00FF;
+    EFE[idx][16] = (unsigned char)(first_cont_blks >> 8);
+    EFE[idx][17] = (unsigned char)first_cont_blks & 0x00FF;
 
     // start block
     EFE[idx][18] = EFE_start_block >> 24;
     EFE[idx][19] = EFE_start_block >> 16;
-    EFE[idx][20] = EFE_start_block >>  8;
+    EFE[idx][20] = EFE_start_block >> 8;
     EFE[idx][21] = EFE_start_block & 0x000000FF;
 
     // Go to Dir entry
 
     // Write System Blocks
-    if(media_type=='f') {
+    if (media_type == 'f')
+    {
       // FILE ACCESS
-      lseek(out, dir_start*BLOCK_SIZE + EFE_SIZE*idx , SEEK_SET);
-      write(out,EFE[idx],EFE_SIZE);
-    } else {
+      lseek(out, dir_start * BLOCK_SIZE + EFE_SIZE * idx, SEEK_SET);
+      write(out, EFE[idx], EFE_SIZE);
+    }
+    else
+    {
       // DISK ACCESS
 
       // !!!!!
-      if(dir_start == DIR_START_BLOCK) {
-		memcpy(DiskHdr+dir_start*BLOCK_SIZE + EFE_SIZE*idx,EFE[idx],EFE_SIZE);
+      if (dir_start == DIR_START_BLOCK)
+      {
+        memcpy(DiskHdr + dir_start * BLOCK_SIZE + EFE_SIZE * idx, EFE[idx], EFE_SIZE);
       }
 
       //WriteBlocks(media_type,fd,NULL,0,5+fat_blks,DiskHdr);
     }
 
     // If Not in Main Dir, update Dir Entries & num. of  files in dir
-    if(dir_start != DIR_START_BLOCK) {
+    if (dir_start != DIR_START_BLOCK)
+    {
 
       unsigned char ParentEFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE];
       unsigned int parent_dir_idx, parent_dir_files;
 
       // Save changes in current dir
-      SaveDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont,EFE);
+      SaveDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, EFE);
 
       // Get info about parent dir
-      parent_dir_idx  = (unsigned int)  ((EFE[0][16] << 8) + EFE[0][17]);
-      dir_start       = (unsigned long) ((EFE[0][18] << 24) + (EFE[0][19] << 16)
-					 +(EFE[0][20] << 8 ) +  EFE[0][21]);
+      parent_dir_idx = (unsigned int)((EFE[0][16] << 8) + EFE[0][17]);
+      dir_start = (unsigned long)((EFE[0][18] << 24) + (EFE[0][19] << 16) + (EFE[0][20] << 8) + EFE[0][21]);
 
       // Don't know how many contiguous blocks so assume worst case.
       dir_cont = 1;
 
       // Load parent dir
-      LoadDirBlocks(media_type,fd,DiskFAT,out,dir_start,dir_cont,ParentEFE);
+      LoadDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, ParentEFE);
 
       // Update parent dir 'num. of files'
-      parent_dir_files =(unsigned int)  ((ParentEFE[parent_dir_idx][14] << 8) +
-					 ParentEFE[parent_dir_idx][15]);
+      parent_dir_files = (unsigned int)((ParentEFE[parent_dir_idx][14] << 8) +
+                                        ParentEFE[parent_dir_idx][15]);
 
       parent_dir_files++;
-      ParentEFE[parent_dir_idx][14] = (unsigned char) (parent_dir_files >> 8) & 0xFF;
-      ParentEFE[parent_dir_idx][15] = (unsigned char) (parent_dir_files & 0xFF);
+      ParentEFE[parent_dir_idx][14] = (unsigned char)(parent_dir_files >> 8) & 0xFF;
+      ParentEFE[parent_dir_idx][15] = (unsigned char)(parent_dir_files & 0xFF);
 
       // Save changes in parent dir
-      SaveDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont,ParentEFE);
+      SaveDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, ParentEFE);
     }
-	// advance to next EFE filename passed by the command-line
+    // advance to next EFE filename passed by the command-line
     EFEindex++;
 
     // KLUDGE!!!
-    if(MemData != NULL) break;
+    if (MemData != NULL)
+      break;
 
   } // while(EFE_list...)
 
-
   // Free memory used for DiskFat etc. cache
-  if(media_type != 'f') {
+  if (media_type != 'f')
+  {
     // Write SystemBlocks to disk and free mem
-    WriteBlocks(media_type,fd,out,0,5+fat_blks,DiskHdr);
+    WriteBlocks(media_type, fd, out, 0, 5 + fat_blks, DiskHdr);
     free(DiskHdr);
-
-  } else {
+  }
+  else
+  {
 
     // Convert to back to original format if not raw image
-    if((image_type != EPS_TYPE) && (image_type != ASR_TYPE) && (image_type != E16_SD_TYPE) && (image_type != ASR_SD_TYPE) && (image_type != OTHER_TYPE)) {
+    if ((image_type != EPS_TYPE) && (image_type != ASR_TYPE) && (image_type != E16_SD_TYPE) && (image_type != ASR_SD_TYPE) && (image_type != OTHER_TYPE))
+    {
 
-      if(MemData != NULL) {
-		close(in);
+      if (MemData != NULL)
+      {
+        close(in);
       }
 
       close(out);
-      ConvertFromImage (image_file, orig_image_name, image_type);
+      ConvertFromImage(image_file, orig_image_name, image_type);
     }
   }
 
-  free(EFE_list);	// free memory for EFE filelist
-  printf("\r                                         \r");fflush(stdout);
-
+  free(EFE_list); // free memory for EFE filelist
+  printf("\r                                         \r");
+  fflush(stdout);
 }
 
 /////////////////////////////
@@ -4110,8 +4190,6 @@ int EraseEFEs(char media_type, char image_type, FD_HANDLE fd,
     cont =(unsigned int)  ((EFE[j][16] << 8) + EFE[j][17]);
     start=(unsigned long) ((EFE[j][18] << 24) + (EFE[j][19] << 16)
 			   +(EFE[j][20] <<8 ) +  EFE[j][21]);
-
-    printf("cont: %ld start: %ld\n", cont, start);
 
     // Calculate 'disk-free'
     *free_blks = (*free_blks) + size;
