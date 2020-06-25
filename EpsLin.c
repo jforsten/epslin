@@ -4195,8 +4195,11 @@ int EraseEFEs(char media_type, char image_type, FD_HANDLE fd,
     *free_blks = (*free_blks) + size;
 
     // Clear FAT entries
-    
+#ifdef __CYGWIN__
+    if(((media_type=='f') || (media_type=='s')) && cont == size) {
+#else //Linux
     if(media_type=='f' && cont == size) { 
+#endif
       // Use buffering if cont blocks 
       WriteFATBlocks(media_type, DiskFAT, out, start, cont, 1);
     } else {
