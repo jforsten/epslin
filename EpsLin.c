@@ -51,20 +51,22 @@
 //       - Use 's' media type in Get and in GetFat/SetFat
 //
 // vX.XX: [FUTURE - from Neo fork]
-//       - TODO: allow a sector offset to be supplied; needed to 
+//       - TODO: allow a sector offset to be supplied; needed to
 //               handle direct access of SCSI2SD-ready SD cards
-//       - TODO: check for Ensoniq volume signatures prior to any 
+//       - TODO: check for Ensoniq volume signatures prior to any
 //               non-Format related routines
 //       - TODO: add recursive mode for GetEFE
 //       - TODO: create named sub-directories when GetEFE is used
 //               such as 'root', etc. to hold EFEs on export
 //
-//  v1.60: 
+//  v1.61:
+//       - Help to show option for JSON output 
+//  v1.60:
 //       - Source file naming - no more version in filename for proper version
 //         control support.
 //       - Directory and Disk Information mode is now default.
 //       - JSON output (-J)
-//       - Support for 4GB partitions (i.e. prints the free blocks/bytes correctly)  
+//       - Support for 4GB partitions (i.e. prints the free blocks/bytes correctly)
 //
 //  v1.51: [from Neo]
 //       - Fixed error with additional IsEFE checks from v1.47.
@@ -246,7 +248,7 @@
 								// (this value is ORed, so no harm is done..)
 #endif
 
-#define VERSION     "v1.60"
+#define VERSION     "v1.60A"
 
 #define BLOCK_SIZE      512				// amount of bytes per block
 #define ID_BLOCK          1				// ID block is 1 because block 0 is null (0x6D/0xB6 filler)
@@ -521,6 +523,9 @@ void ShowUsage()
   printf("   -b bank.efe  Bank info. Prints useful(?) inside info about bank EFE \n\n");
 
   printf("   -P           Parse-friendly output. Use with GUI/frontend software \n\n");
+
+  printf("   -J           JSON output. Use with GUI/frontend software \n\n");
+
   printf("image_file = Ensoniq EPS/EPS16/ASR-type disk image file \n\n");
 }
 
