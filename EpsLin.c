@@ -60,7 +60,9 @@
 //               such as 'root', etc. to hold EFEs on export
 //
 //  v1.61:
-//       - Help to show option for JSON output 
+//       - Help to show option for JSON output
+//       - Removed COMpPUTER READABLE output as JSON will replace it
+//       - Fixed minor detail in EFE header to better align with the specs
 //  v1.60:
 //       - Source file naming - no more version in filename for proper version
 //         control support.
@@ -325,7 +327,6 @@
 
 // Print modes
 #define HUMAN_READABLE    0
-#define COMPUTER_READABLE 1
 #define JSON              2
 
 // Return values
@@ -365,7 +366,6 @@ char* LastError ()
 
 // Temp-file name
 static char tmp_file[13] = "EpsLinXXXXXX";
-//static char tmp_file[64];
 
 // Declaration of ReadBlocks
 int ReadBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block,
@@ -521,8 +521,6 @@ void ShowUsage()
   printf("                Example: -s big.efe asr       : Slices to fit ASR HD size \n\n");
 
   printf("   -b bank.efe  Bank info. Prints useful(?) inside info about bank EFE \n\n");
-
-  printf("   -P           Parse-friendly output. Use with GUI/frontend software \n\n");
 
   printf("   -J           JSON output. Use with GUI/frontend software \n\n");
 
@@ -744,9 +742,6 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
     printf(" \"total_blocks\":%lu,\n", free_blks+used_blks);
     printf(" \"total_bytes\":%lu,\n", (unsigned long)(free_blks+used_blks)*512);
     printf(" \"items\":[\n");  
-  } else {
-    //Computer readable: Label,media, used block, used bytes, free blocks, free bytes
-    printf("%s,%s,%d,%lu,%lu,%lu,%lu,%lu\n",DiskLabel,media, used_blks, (unsigned long) (used_blks)*512, free_blks, (unsigned long) (free_blks)*512,  free_blks+used_blks, (unsigned long)(free_blks+used_blks)*512);
   }
 
   for(j=0;j<MAX_NUM_OF_DIR_ENTRIES;j++){
@@ -844,18 +839,11 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
         printf("   }");
 
         first_item = 0;
-      } else {
-	      // Computer readable
-	      printf("%d,%s,%d,%s,%d,%d,%s,%ld\n",j, EpsTypes[type], real_type, name,EFE[j][22], size, dosname, (unsigned long) (size+1)*512);
       }
 
       // This line is for debugging. Uncomment it if needed
       //printf(" %02d | %s(%d)  | %-12s | %4d | start=%d(%x) , cont=%d(%x) |\n",j,EpsTypes[type],real_type,name ,size, start,start,cont,cont);
     }
-    //else if (printmode == COMPUTER_READABLE) {
-    // If empty dir entry in this index, print "null" line for easier computer parsing...
-    //   printf("%d,%s,%d,%s,%d,%d,%s,%ld\n",j, "(empty)",0 ,"", 0,0,"",0);
-    //}
   }
 
   if (printmode == JSON) {
@@ -873,6 +861,79 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
 }
 
 /////////////////////////////////////
+// PrintEFEInfo
+// =============
+// - Prints the basic info of the EFE file
+int PrintEFEInfo(char filename[FILENAME_MAX], int printmode)
+{
+  int fd;
+  int mode, count;
+  unsigned char data[1024];
+  if (printmode == JSON) {
+    // JSON
+    printf("{\n");
+
+    if ((fd = open(filename, O_RDONLY | O_BINARY, 0)) <= 0)
+    {
+      printf("\"error\":\"ERROR: File not found!\"\n");
+      printf("}\n");
+      return (ERR);
+    }
+
+    if ((count = read(fd, data, 0x222)) < 0x222)
+    {
+      printf(" \"error\":\"ERROR: File read error!\"\n");
+      printf("}\n");
+      return (ERR);
+    }
+
+    printf("  \"name\":");
+    printf("\"");
+
+    for (int i = 0x12; i < 0x1e; i++)
+    {
+      printf("%c", data[i]);
+    }
+    printf("\",\n");
+    printf("  \"type_id\":%d,\n", data[0x32]);
+    printf("  \"type\":\"%s\",\n", EpsTypes[data[0x32]]);
+    printf("  \"blocks\":%d,\n", data[0x34] * 256 + data[0x35]);
+    printf("  \"bytes\":%d,\n", (data[0x34] * 256 + data[0x35])*512);
+    printf("  \"multifile_idx\":%d,\n", data[0x3a]);
+    printf("  \"filename\":\"%s\"\n", filename);
+    printf("}\n");
+    return (OK);
+  }
+  else
+  {
+    // HUMAN READABLE
+    if ((fd = open(filename, O_RDONLY | O_BINARY, 0)) <= 0)
+    {
+      printf("ERROR: File not found!\n");
+      return (ERR);
+    }
+
+    if ((count = read(fd, data, 0x222)) < 0x222)
+    {
+      printf("ERROR: File read error!\n");
+      return (ERR);
+    }
+
+    printf("Name:");
+    for (int i = 0x12; i < 0x1e; i++)
+    {
+      printf("%c", data[i]);
+    }
+    printf("\n");
+    printf("Type:%s\n", EpsTypes[data[0x32]]);
+    printf("Size in blocks:%d\n", data[0x34] * 256 + data[0x35]);
+    printf("Multifile index: %d\n", data[0x3a]);
+
+    return (OK);
+  }
+}
+
+/////////////////////////////////////
 // PrintBankInfo
 // =============
 // - Prints the structure of bank including
@@ -885,126 +946,132 @@ int PrintBankInfo(char filename[FILENAME_MAX], int printmode)
   int fd;
   int i,j,k;
   unsigned char data[1024];
+  int isFirst = 1;
 
-  if(printmode == COMPUTER_READABLE) {
-    // COMPUTER READABLE
+  if(printmode == JSON) {
+  // JSON
+    printf("{\n");
 
-
-    //Open & Read
-    if( (fd=open(filename,  O_RDONLY | O_BINARY, 0)) <= 0) {
-      printf("1\n");
-      return(1);
-    }
-    if((count=read(fd,data,0x222)) < 0x222) {
-      printf("1\n");
-      return(1);
+    if ((fd = open(filename, O_RDONLY | O_BINARY, 0)) <= 0)
+    {
+      printf("\"error\":\"ERROR: File not found!\"\n");
+      printf("}\n");
+      return (ERR);
     }
 
-    // Get Bank type
-    if((data[0x32] != 4) &&  (data[0x32] != 23) && (data[0x32] != 30)) {
-      printf("2\n");
-      return(1);
+    if ((count = read(fd, data, 0x222)) < 0x222)
+    {
+      printf(" \"error\":\"ERROR: File read error!\"\n");
+      printf("}\n");
+      return (ERR);
     }
 
-    // OK
-    printf("0\n");
-
-    // Bank Type
-    mode=data[0x32];
-    printf("%d\n",mode);
-
-    // Check Num of Blocks
+     // Check Num of Blocks
     if(data[0x35] > 3) {
       effectFound = 1;
     }
 
-
-    // Bank Name
+    printf("  \"name\":\"");
     for(i=0x208;i<0x220;i=i+2) {
       printf("%c",data[i]);
     }
-    //Mask
-    printf("\n%d\n",data[0x220]);
-    instValid[7] = (data[0x220] >> 7) & 0x01;
-    instValid[6] = (data[0x220] >> 6) & 0x01;
-    instValid[5] = (data[0x220] >> 5) & 0x01;
-    instValid[4] = (data[0x220] >> 4) & 0x01;
-    instValid[3] = (data[0x220] >> 3) & 0x01;
-    instValid[2] = (data[0x220] >> 2) & 0x01;
-    instValid[1] = (data[0x220] >> 1) & 0x01;
-    instValid[0] =  data[0x220]       & 0x01;
-
-
+    printf("\",\n");
+    printf("  \"inst_mask\":%d,\n",data[0x220]);
+    
+    printf("  \"instruments\":\n  [");
     for(j=0;j<9;j++) {
-
       //eps
       if(mode==MODE_EPS) {
-	read(fd,data,16);
+	      read(fd,data,16);
       } else if(mode==MODE_E16) {
-	read(fd,data,16);
+	      read(fd,data,16);
       } else {
-	read(fd,data,28);
+	      read(fd,data,28);
       }
 
-      // Valid instrument?
-      if(j<8) {
-
-	if(!instValid[j]) {
-	  printf("0\n");
-	  continue;
-	}
+      if(data[0] >= 0x80) {
+	      if(j==8) {
+	        printf("\n  ]");
+	      } else {
+          if(isFirst) {
+            printf("\n    {\n");
+            isFirst = 0;
+          } else {
+            printf(",\n    {\n");
+          }
+          printf("    \"idx\":%d,\n",j+1);
+          printf("    \"copy\":%d\n",(data[0] & 0x0f)+1);
+          printf("    }");
+	      }
+      } else if (data[0] == 0x7f) {
+	      // printf("Deleted\n");
       } else {
-	// Valid song ?
-	if(data[4] == 0) {
-	  printf("0\n");
-	  continue;
-	}
-      }
+        if(j==8) {
+          printf("\n  ],\n");
+          printf("  \"song\": {\n");
+          printf("    \"path_depth\":%d,\n",data[0]);
+	        printf("    \"ff\":%d,\n",data[1]);
+	        printf("    \"media_id\":%d,\n",data[2]);
+	        printf("    \"disk_lable\":\"%c%c%c%c%c%c%c\",\n",
+	          data[ 3],
+	          data[ 5],
+	          data[ 7],
+	          data[ 9],
+	          data[11],
+	          data[13],
+	          data[15]
+          );
 
-      // Inst/Song info
-      if(data[0] > 0x7f) {
-	//Song?
-	if(j==8) {
-	  printf("0\n");
-	} else {
-	  // "Copy of" + Inst num
-	  printf("2,%d\n",(data[0] & 0x0f)+1);
-	}
-      } else {
+	        if(data[0] > 0) {
+	          printf("    \"path\":\"");
+	          for(k=0;k<data[0];k++) {
+	            printf("/%d",data[ 4+2*k]);
+	          }
+            printf("\",\n");
+	          printf("    \"path_idx\":%d\n",data[4+2*k]);
+	        } else {
+	          printf("    \"path_idx\":%d\n",data[4]);
+	        }
+          printf("  }");
+        } else {
+           if(isFirst) {
+            printf("\n    {\n");
+            isFirst = 0;
+          } else {
+            printf(",\n    {\n");
+          }
+          printf("      \"idx\":%d,\n", j+1);
+	        printf("      \"path_depth\":%d,\n",data[0]);
+	        printf("      \"ff\":%d,\n",data[1]);
+	        printf("      \"media_id\":%d,\n",data[2]);
+	        printf("      \"disk_lable\":\"%c%c%c%c%c%c%c\",\n",
+	          data[ 3],
+	          data[ 5],
+	          data[ 7],
+	          data[ 9],
+	          data[11],
+	          data[13],
+	          data[15]
+          );
 
-	//"Valid" + Path Depth
-	printf("1,%d,",data[0]);
-	// Device
-	printf("%d,",data[2]);
-	//Media Name (if any)
-	if(mode==MODE_EPS) {
-	  printf("<NONE>,");
-	} else {
-	  printf("%c%c%c%c%c%c%c,",
-		 data[ 3],
-		 data[ 5],
-		 data[ 7],
-		 data[ 9],
-		 data[11],
-		 data[13],
-		 data[15]);
-	}
-
-	if(data[0] > 0) {
-	  for(k=0;k<data[0];k++) {
-	    printf("/%d",data[ 4+2*k]);
-	  }
-	  printf(",%d\n",data[4+2*k]);
-	} else {
-	  printf("/,%d\n",data[4]);
-	}
-
+	        if(data[0] > 0) {
+	          printf("      \"path\":\"");
+	          for(k=0;k<data[0];k++) {
+	            printf("/%d",data[ 4+2*k]);
+	          }
+            printf("\",\n");
+	          printf("      \"path_idx\":%d\n",data[4+2*k]);
+	        } else {
+	          printf("      \"path_idx\":%d\n",data[4]);
+	        }
+          printf("    }");
+        }
       }
     }
     if(effectFound) {
       lseek(fd,0x800,0);
       read(fd,data,64);
-      printf("1,%c%c%c%c%c%c%c%c%c%c%c%c\n",
+      printf(",\n  \"effect\":\"%c%c%c%c%c%c%c%c%c%c%c%c\"\n",
 	     data[10],
 	     data[12],
 	     data[14],
@@ -1017,11 +1084,8 @@ int PrintBankInfo(char filename[FILENAME_MAX], int printmode)
 	     data[28],
 	     data[30],
 	     data[32]);
-
-    } else {
-      printf("0\n");
     }
-
+    printf("}\n");
   } else {
     // HUMAN READABLE
 
@@ -1141,7 +1205,7 @@ int PrintBankInfo(char filename[FILENAME_MAX], int printmode)
 	     data[32]);
     }
   }
-  return(0);
+  return(OK);
 }
 
 
@@ -3350,8 +3414,9 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
     Header[1] =0x0A;
     strcpy(&Header[2],"Eps File:       ");
     strcpy(&Header[18],name);
-    strcpy(&Header[30],EpsTypes[type]);
-    strcpy(&Header[37],"          ");
+    strcpy(&Header[30],"    ");
+    strcpy(&Header[34],EpsTypes[type]);
+    strcpy(&Header[41],"      ");
 
     // CR, LF, EOF
     Header[47]=0x0D; Header[48]=0x0A; Header[49]=0x1A;
@@ -5241,34 +5306,30 @@ int main(int argc, char **argv)
   confirm_operation = 0;
   // generate default disk label
   strncpy(DiskLabel,DEFAULT_DISK_LABEL,DISK_LABEL_SIZE);
-  //
+
   fd= (FD_HANDLE) NULL;
 
   // initialize an array which deals with GetEFE routine
   for(i=0;i < MAX_NUM_OF_DIR_ENTRIES; i++) process_EFE[i]=0;
 
-  //printf("\n");
-
   // Get options and parameters
   while (1)
 	{
 		// parse command-line arguments
-		// c = getopt(argc, argv, "Pj:b:srwf:g:p::e:d:m:itc:C::l:qI");
-		   c = getopt(argc, argv, "PJj:b:srwf:g:p::e:d:m:itc:C::l:qID?");
+		c = getopt(argc, argv, "Jj:b:E:srwf:g:p::e:d:m:itc:C::l:qID?");
 		if (c == -1)
 		{
 			break;			// break the while loop if no arguments are supplied -- skips switch handling
 		}
 
 		switch (c)
-		{	
-			case 'b':         // ** Bank Info **
+		{
+      case 'E': // ** Bank Info **
+      PrintEFEInfo(optarg, printmode);
+      exit(OK);
+      case 'b': // ** Bank Info **
 			PrintBankInfo(optarg,printmode);
-			//printf("%d,%s\n",printmode,optarg);
 			exit(OK);
-			break;
-			case 'P':         // ** COMPUTER READABLE DIRLIST **
-			printmode = COMPUTER_READABLE;
 			break;
       case 'J': // ** JSON DIRLIST **
       printmode = JSON;
@@ -5287,7 +5348,6 @@ int main(int argc, char **argv)
 			break;
 
 			case 'C':        // ** CHECK MEDIA **
-			//printf("argv[optind=%d]=%s,argc=%d\n",optind,argv[optind],argc);
 			GetMedia(argv[optind], argc,  &media_type, &image_type, &nsect, &trk_size, &fd, in_file, &in);
 			if(optarg==NULL) check_level=0; else check_level=*optarg-'0';
 			CheckMedia(media_type, fd, in, check_level);
@@ -5308,7 +5368,6 @@ int main(int argc, char **argv)
 
 			case 'I':        // ** IMAGE COPY ***
 			if(confirm_operation ==0) Confirm();
-			//printf("source=%s,target=%s\n",argv[optind],argv[optind+1]);
 			ImageCopy(argv[optind],argv[optind+1]);
 			exit(OK);
 			break;
@@ -5352,7 +5411,6 @@ int main(int argc, char **argv)
 
 			case 'd': 	  // ** Directory **
 			ParseDir(optarg, DirPath, &subdir_cnt);
-			//printf("DirPath:%s\n",optarg);
 			break;
 
 			case 'D': 	  // ** Directory **
