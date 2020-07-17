@@ -60,9 +60,11 @@
 //               such as 'root', etc. to hold EFEs on export
 //
 //  v1.61:
-//       - Help to show option for JSON output
-//       - Removed COMpPUTER READABLE output as JSON will replace it
-//       - Fixed minor detail in EFE header to better align with the specs
+//       - Help to show option for JSON output.
+//       - Removed COMPUTER READABLE output as JSON will replace it.
+//       - Fixed minor detail in EFE header to better align with the specs.
+//       - EFE info added. Bank info has now JSON output support.
+//
 //  v1.60:
 //       - Source file naming - no more version in filename for proper version
 //         control support.
@@ -521,6 +523,8 @@ void ShowUsage()
   printf("                Example: -s big.efe asr       : Slices to fit ASR HD size \n\n");
 
   printf("   -b bank.efe  Bank info. Prints useful(?) inside info about bank EFE \n\n");
+
+  printf("   -E file.efe  EFE info. Prints useful(?) inside info about EFE file \n\n");
 
   printf("   -J           JSON output. Use with GUI/frontend software \n\n");
 
