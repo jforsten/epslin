@@ -5294,13 +5294,22 @@ int main(int argc, char **argv)
 
   unsigned long i,j;
 
-  char c, media_type, image_type, process_EFE[MAX_NUM_OF_DIR_ENTRIES], in_file[FILENAME_MAX];
+  unsigned char c;
+  char media_type, image_type, process_EFE[MAX_NUM_OF_DIR_ENTRIES], in_file[FILENAME_MAX];
   char mkdir_name[12], parent_dir_name[12];
   char format_arg;
   FD_HANDLE fd;
   unsigned int trk_size, nsect;
   int mode,printmode;
   int check_level, confirm_operation;
+
+#ifdef __APPLE__
+  if(argc == 1) {
+    // in OSX as there is no floppy, just show usage if no args
+    ShowUsage();
+    return (ERR);
+  }
+#endif
 
   //
   // Initialize variables
@@ -5316,7 +5325,7 @@ int main(int argc, char **argv)
   // generate default disk label
   strncpy(DiskLabel,DEFAULT_DISK_LABEL,DISK_LABEL_SIZE);
 
-  fd= (FD_HANDLE) NULL;
+  fd = (FD_HANDLE) NULL;
 
   // initialize an array which deals with GetEFE routine
   for(i=0;i < MAX_NUM_OF_DIR_ENTRIES; i++) process_EFE[i]=0;
@@ -5325,20 +5334,14 @@ int main(int argc, char **argv)
   while (1)
 	{
 		// parse command-line arguments
-		c = getopt(argc, argv, "Jj:b:E:srwf:g:p::e:d:m:itc:C::l:qID?");
-		if (c == -1)
-		{
-#ifdef __APPLE__
-      // in OSX as there is no floppy, just show usage if no args
-      ShowUsage();
-      return (ERR);
-#endif
-			break;			// break the while loop if no arguments are supplied -- skips switch handling
-		}
+		c = (unsigned char) getopt(argc, argv, "Jj:b:E:srwf:g:p::e:d:m:itc:C::l:qI");
+		if (c == 255) break;
+
+printf("%c \n",c);
 
 		switch (c)
 		{
-      case 'E': // ** Bank Info **
+      case 'E': // ** EFE Info **
       PrintEFEInfo(optarg, printmode);
       exit(OK);
       case 'b': // ** Bank Info **
@@ -5425,10 +5428,6 @@ int main(int argc, char **argv)
 
 			case 'd': 	  // ** Directory **
 			ParseDir(optarg, DirPath, &subdir_cnt);
-			break;
-
-			case 'D': 	  // ** Directory **
-			mode=DIRLIST;
 			break;
 
 			case 'm': 	  // ** Make directory **
