@@ -1,6 +1,5 @@
 /////////////////////////////////////////////////////
 //
-// EpsLin v1.60
 // EpsLin (c) Juha Forsten 2020
 // https://gitlab.com/jforsten/EpsLin
 //-------------------------------------------------
@@ -58,6 +57,9 @@
 //       - TODO: add recursive mode for GetEFE
 //       - TODO: create named sub-directories when GetEFE is used
 //               such as 'root', etc. to hold EFEs on export
+//
+//  v1.62: 
+//       - Minor fixes mainly for OS X
 //
 //  v1.61:
 //       - Help to show option for JSON output.
@@ -252,7 +254,7 @@
 								// (this value is ORed, so no harm is done..)
 #endif
 
-#define VERSION     "v1.60A"
+#define VERSION     "v1.62"
 
 #define BLOCK_SIZE      512				// amount of bytes per block
 #define ID_BLOCK          1				// ID block is 1 because block 0 is null (0x6D/0xB6 filler)
@@ -423,7 +425,7 @@ static char *EpsTypes[40]={
 // ShowUsage
 void ShowUsage()
 {
-  printf("\nEpsLin Neo %s -- open source Ensoniq EPS/ASR file and disk utility \n", VERSION);
+  printf("\nEpsLin %s -- Ensoniq EPS/ASR file and disk utility \n", VERSION);
   printf("==============================================================================\n");
   printf("\nUsage: epslin [options] [imagefile or device] [EFE #0] [EFE #1] ... [EFE #N]\n\n");
   printf("Options:\n-------- \n\n");
@@ -739,11 +741,11 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
     printf("{\n");
     printf(" \"file\":\"%s\",\n", in_file);
     printf(" \"label\":\"%s\",\n", DiskLabel);
-    printf(" \"used_blocks\":%lu,\n", used_blks);
+    printf(" \"used_blocks\":%u,\n", used_blks);
     printf(" \"used_bytes\":%lu,\n", (unsigned long)(used_blks)*512);
-    printf(" \"free_blocks\":%lu,\n", free_blks);
+    printf(" \"free_blocks\":%u,\n", free_blks);
     printf(" \"free_bytes\":%lu,\n", (unsigned long)(free_blks)*512);
-    printf(" \"total_blocks\":%lu,\n", free_blks+used_blks);
+    printf(" \"total_blocks\":%u,\n", free_blks+used_blks);
     printf(" \"total_bytes\":%lu,\n", (unsigned long)(free_blks+used_blks)*512);
     printf(" \"items\":[\n");  
   }
@@ -816,7 +818,7 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
         printf("     \"type\":\"%s\",\n", EpsTypes[type]);
         printf("     \"name\":\"%s\",\n", name);
         printf("     \"blocks\":%d,\n", size);
-        printf("     \"bytes\":%d,\n", (unsigned long)(size + 1) * 512);
+        printf("     \"bytes\":%lu,\n", (unsigned long)(size + 1) * 512);
 
         char tmp_name[64];
         char tmp_type_text[10];
@@ -856,10 +858,10 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
 
   if(printmode == HUMAN_READABLE) {
     printf("------+----------+--------------+---------+---------------------------------+\n");
-    printf(" Used:  %23lu Blocks    |  Used: %16lu Bytes   |\n", used_blks, (unsigned long) (used_blks)*512);
-    printf(" Free:  %23lu Blocks    |  Free: %16lu Bytes   |\n", free_blks, (unsigned long) (free_blks)*512);
+    printf(" Used:  %23u Blocks    |  Used: %16lu Bytes   |\n", used_blks, (unsigned long) (used_blks)*512);
+    printf(" Free:  %23u Blocks    |  Free: %16lu Bytes   |\n", free_blks, (unsigned long) (free_blks)*512);
     printf("----------------------------------------------------------------------------+\n");
-    printf(" Total: %23lu Blocks    |  Total:%16lu Bytes   |\n", free_blks+used_blks, (unsigned long) (free_blks+used_blks)*512);
+    printf(" Total: %23u Blocks    |  Total:%16lu Bytes   |\n", free_blks+used_blks, (unsigned long) (free_blks+used_blks)*512);
     printf("----------------------------------------------------------------------------+\n\n");
   }
 }
@@ -1983,7 +1985,7 @@ void FD_Seek(FD_HANDLE fd, int track)
 ////////////////////////////
 // FD_Raw Read/Write Track
 // (read: rw=1, write: rw=2)
-int FD_RawRW_DiskTrack(FD_HANDLE fd, char disk_type, int track, int head, char *buffer, int rw)
+int FD_RawRW_DiskTrack(FD_HANDLE fd, char disk_type, int track, int head, unsigned char *buffer, int rw)
 {
 #ifdef __CYGWIN__
   unsigned int datalen;
@@ -2081,16 +2083,15 @@ int FD_RawRW_DiskTrack(FD_HANDLE fd, char disk_type, int track, int head, char *
   if (raw_cmd.reply[0]>= 40) {
     return(ERR);
   }
-
-  return(OK);
 #endif
+  return(OK);
 }
 
 ////////////////////////////
 // FD_Raw Read/Write Blocks
 // (read: rw=1, write: rw=2)
 int FD_RawRW_DiskSectors(FD_HANDLE fd, char disk_type, int track, int head,
-			 int sector, int num_of_sectors, char *buffer, int rw)
+			 int sector, int num_of_sectors, unsigned char *buffer, int rw)
 {
 
 #ifdef __CYGWIN__
@@ -2178,9 +2179,8 @@ int FD_RawRW_DiskSectors(FD_HANDLE fd, char disk_type, int track, int head,
   if (raw_cmd.reply[0]>= 40) {
     return(ERR);
   }
-
-  return(OK);
 #endif
+  return(OK);
 }
 
 #ifdef __CYGWIN__
@@ -2202,7 +2202,7 @@ typedef FormatHeader FormatHeaders[MAX_DISK_SECT];
 
 ////////////////////
 // Format DiskTrack
-int FD_Format_DiskTrack(FD_HANDLE fd, int track, int head, int nsect, int rate, int skew)
+int FD_Format_DiskTrack(FD_HANDLE fd, unsigned int track, unsigned int head, unsigned int nsect, int rate, int skew)
 {
 
 #ifdef __CYGWIN__
@@ -2277,9 +2277,8 @@ int FD_Format_DiskTrack(FD_HANDLE fd, int track, int head, int nsect, int rate, 
     printf("\n\nDisk is WRITE PROTECTED!! \n\n");
     return(ERR);
   }
-
-  return(OK);
 #endif
+  return(OK);
 }
 
 ////////////////
@@ -2514,11 +2513,11 @@ void FD_Format_Disk(char disk_type, int nsect, int rate, char* disk_label)
 
 ///////////////////////////////////////////////////////////
 // Check which type of disk is inserted (EPS=DD or ASR=HD)
-int FD_GetDiskType(char *disk_type, int *nsect, int *trk_size)
+int FD_GetDiskType(char *disk_type, unsigned int *nsect, unsigned int *trk_size)
 {
 
   FD_HANDLE fd;
-  char buffer[20*512];
+  unsigned char buffer[20*512];
 
   *disk_type='n';
 
@@ -2561,9 +2560,10 @@ void FD_RW_Disk(char in_file[FILENAME_MAX], int rw_disk)
   int file;
 
   FD_HANDLE fd;
-  int track,head,nsect,trk_size,convert,idx, errors;
+  unsigned int track,head,nsect,trk_size,convert,idx, errors;
   char disk_type, image_type;
-  char buffer[512 * 20],str[81],tmp, filename[FILENAME_MAX];
+  unsigned char buffer[512 * 20];
+  char str[81], tmp, filename[FILENAME_MAX];
   char mark[5] = {'\\','/','#','E','E'};
   char errors_text[20000];
 
@@ -2877,8 +2877,8 @@ int ReadBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block
 int WriteBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block,
 		unsigned int length, unsigned char *buffer)
 {
-  int sector,head,track;
-  int end_sector,  end_head,  end_track;
+  unsigned int sector,head,track;
+  unsigned int end_sector,  end_head,  end_track;
   unsigned int end_block, cur_block,nsect = 0, num_of_sectors, start_sector, tmp;
   unsigned char tmp_buffer[BLOCK_SIZE*20];
 
@@ -3362,7 +3362,8 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
 {
   int out;
   unsigned int i,j,k, size, cont, start, fatval, bp;
-  unsigned char type, Header[BLOCK_SIZE], *mem_pointer;
+  unsigned char type, *mem_pointer;
+  char Header[BLOCK_SIZE];
   char name[13],dosname[64],tmp_name[64];
   unsigned char Data[BLOCK_SIZE];
   char type_text[8];
@@ -3586,7 +3587,8 @@ int PutEFE(
   int in, out;
   char in_file[FILENAME_MAX];
   unsigned int idx, i, j, blks, start;
-  unsigned char EFE_name[13], EFEData[EFE_SIZE], buffer[4], EFE_type, Data[BLOCK_SIZE];
+  char EFE_name[13];
+  unsigned char EFEData[EFE_SIZE], buffer[4], EFE_type, Data[BLOCK_SIZE];
   unsigned char *mem_pointer;
   unsigned int EFE_start_block, EFE_blks, first_free_block, first_cont_blks, prev_block;
   unsigned int free_start, free_cnt, OS;
@@ -3641,7 +3643,7 @@ int PutEFE(
     if (dp != NULL)
     { // do the following if the local directory exists and can be accessed
       // start directory parsing
-      while (entry = readdir(dp))
+      while ( (entry = readdir(dp)) )
       {
         // d_name is filename for current file being examined in the directory
         //
@@ -3758,7 +3760,7 @@ int PutEFE(
       EFE_type = EFEData[0];
 
       // name
-      strcpy(&EFE[idx][2], EFE_name);
+      strcpy( (char *) &EFE[idx][2], EFE_name);
       // zero
       EFE[idx][0] = 0;
       // type
@@ -4196,6 +4198,8 @@ int PutEFE(
   free(EFE_list); // free memory for EFE filelist
   printf("\r                                         \r");
   fflush(stdout);
+
+  return(OK);
 }
 
 /////////////////////////////
@@ -4441,7 +4445,7 @@ int MkDir(
   // Type (8)
   MemData[1] = 8;
   // Name of parent dir
-  strncpy(MemData+2, dir_name, 12);
+  strncpy( (char *) MemData+2, dir_name, 12);
   // Cont ( < 255!!)
   MemData[17] = (unsigned char) dir_cont;
   // Root Dir start block
@@ -4607,7 +4611,7 @@ void JoinEFEs (int argc, char **argv) {
     exit(ERR);
   }
 
-  sprintf(out_file,argv[2]);
+  sprintf(out_file, "%s", argv[2]);
   // Open Output file
   if((out=open(out_file, O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS)) < 0) {
     EEXIT((stderr,"ERROR: Couldn't open file '%s'. \n",out_file));
@@ -4919,7 +4923,7 @@ void GetInfo(char *media_type, FD_HANDLE fd, unsigned char **DiskFAT, unsigned c
 			        (mem_pointer[tmp+16] << 8 ) +
 			        (mem_pointer[tmp+17] & 0x000000ff));
 
-  strncpy(DiskLabel, mem_pointer+tmp+31,7);
+  strncpy(DiskLabel, (char *) mem_pointer+tmp+31,7);
   DiskLabel[7]='\0';
 
   if(strlen(DiskLabel) == 0) strcpy(DiskLabel,"<NONE>");
@@ -4963,7 +4967,7 @@ void GetInfo(char *media_type, FD_HANDLE fd, unsigned char **DiskFAT, unsigned c
 		EEXIT((stderr,"ERROR: Index '%d' is not a directory! \n\n",j));
       }
 
-      strncpy(parent_dir_name, EFE[j]+2, 12);
+      strncpy(parent_dir_name, (char *) EFE[j]+2, 12);
       *dir_cont  =(unsigned int)  ((EFE[j][16] << 8) + EFE[j][17]);
       *dir_start =(unsigned long) ((EFE[j][18] << 24) + (EFE[j][19] << 16)
 				   +(EFE[j][20] << 8 ) +  EFE[j][21]);
@@ -5140,7 +5144,7 @@ void CheckMedia(char media_type, FD_HANDLE fd, int file, int check_level)
 	printf("%02x ",root_dir[i * EFE_SIZE+j]);
       }
       printf("\n");
-      strncpy(name, &root_dir[i * EFE_SIZE+2],12);
+      strncpy(name, (char *) &root_dir[i * EFE_SIZE+2],12);
       name[12]='\0';
 
       printf("    Type:%2d, Name:%12s, Size:%ld, Cont:%ld, Start:%ld \n\n",
@@ -5255,7 +5259,7 @@ int ImageCopy(char *source_file_name, char *target_file_name)
 		// if last read was "full" read, but get all the data left, next read is 0
 		if(read_bytes == 0) break;
 
-    	printf("\rCopying image file... %d%% completed",((100*i++) / ((source_file_size / BLOCK_SIZE) / IMAGE_COPY_BUFFER_BLOCKS)) );
+    	printf("\rCopying image file... %lu%% completed",((100*i++) / ((source_file_size / BLOCK_SIZE) / IMAGE_COPY_BUFFER_BLOCKS)) );
 
 		write_bytes=write(target,buffer,read_bytes);
 		if(write_bytes< 0) {
@@ -5294,7 +5298,8 @@ int main(int argc, char **argv)
   char mkdir_name[12], parent_dir_name[12];
   char format_arg;
   FD_HANDLE fd;
-  int mode, trk_size, nsect,printmode;
+  unsigned int trk_size, nsect;
+  int mode,printmode;
   int check_level, confirm_operation;
 
   //
@@ -5323,6 +5328,11 @@ int main(int argc, char **argv)
 		c = getopt(argc, argv, "Jj:b:E:srwf:g:p::e:d:m:itc:C::l:qID?");
 		if (c == -1)
 		{
+#ifdef __APPLE__
+      // in OSX as there is no floppy, just show usage if no args
+      ShowUsage();
+      return (ERR);
+#endif
 			break;			// break the while loop if no arguments are supplied -- skips switch handling
 		}
 
