@@ -699,7 +699,7 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
 {
   unsigned int size, cont, start;
   unsigned int type, real_type, j, k;
-  char name[13],dosname[17];
+  char name[13], dosname[64];
   char media[FILENAME_MAX];
   char type_text[9];
   int first_item = 1;
@@ -809,7 +809,7 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
 	          }
 	        }
 	      } // else
-      } else if (printmode == JSON) {
+      } else {
         if (first_item == 0) { printf(",\n"); }
         
         printf("   {\n");
@@ -842,6 +842,7 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
         sprintf(dosname, "%s", tmp_name);
 
         printf("     \"filename\":\"%s\"\n", dosname);
+    
         printf("   }");
 
         first_item = 0;
@@ -5336,8 +5337,6 @@ int main(int argc, char **argv)
 		// parse command-line arguments
 		c = (unsigned char) getopt(argc, argv, "Jj:b:E:srwf:g:p::e:d:m:itc:C::l:qI");
 		if (c == 255) break;
-
-printf("%c \n",c);
 
 		switch (c)
 		{
