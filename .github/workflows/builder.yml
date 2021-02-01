@@ -41,7 +41,7 @@ jobs:
           C:\tools\cygwin\bin\bash.exe --login -c 'cp /cygdrive/d/a/epslin/epslin/EpsLin.c /home/runneradmin/'
           C:\tools\cygwin\bin\bash.exe --login -c 'cp /usr/bin/cygwin1.dll /home/runneradmin/'
           C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
-          C:\tools\cygwin\bin\bash.exe --login -c 'cc EpsLin.c -o epslin.exe'
+          C:\tools\cygwin\bin\bash.exe --login -c 'gcc EpsLin.c -o epslin.exe'
           C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
           C:\tools\cygwin\bin\bash.exe --login -c 'zip epslin-win.zip epslin.exe cygwin1.dll'
           C:\tools\cygwin\bin\bash.exe --login -c 'cp /home/runneradmin/epslin-win.zip /cygdrive/d/a/epslin/epslin/'
