@@ -35,5 +35,7 @@ jobs:
         run: |
           echo Add other actions to build,
           echo test, and deploy your project.
+          C:\tools\cygwin\bin\bash.exe --login -c 'pwd'
+          C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
           C:\tools\cygwin\bin\bash.exe --login -c '/usr/bin/wget http://simonowen.com/fdrawcmd/fdrawcmd.h'
-          C:\tools\cygwin\bin\bash.exe --login -c '/usr/bin/gcc EpsLin.c -o epslin'
+          C:\tools\cygwin\bin\bash.exe --login -c '/usr/bin/gcc /cygdrive/d/a/epslin/epslin/EpsLin.c -o epslin.exe'
