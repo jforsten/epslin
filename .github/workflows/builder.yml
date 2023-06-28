@@ -42,9 +42,9 @@ jobs:
           C:\tools\cygwin\bin\bash.exe --login -c 'which gcc'
           C:\tools\cygwin\bin\bash.exe --login -c 'gcc -v'
           C:\tools\cygwin\bin\bash.exe --login -c 'gcc /home/runneradmin/EpsLin.c -I/home/runneradmin -v -o /home/runneradmin/epslin.exe'
-          C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
-          C:\tools\cygwin\bin\bash.exe --login -c 'zip epslin-win.zip epslin.exe cygwin1.dll'
-          C:\tools\cygwin\bin\bash.exe --login -c 'cp /home/runneradmin/epslin-win.zip /cygdrive/d/a/epslin/epslin/'
+          C:\tools\cygwin\bin\bash.exe --login -c 'sleep 5;ls -la'
+          C:\tools\cygwin\bin\bash.exe --login -c 'sleep 10;zip epslin-win.zip epslin.exe cygwin1.dll'
+          C:\tools\cygwin\bin\bash.exe --login -c 'sleep 15;cp /home/runneradmin/epslin-win.zip /cygdrive/d/a/epslin/epslin/'
       - uses: actions/upload-artifact@v2
         with:
           path: ./epslin-win.zip
