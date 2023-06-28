@@ -968,9 +968,29 @@ int PrintBankInfo(char filename[FILENAME_MAX], int printmode)
 
     if ((count = read(fd, data, 0x222)) < 0x222)
     {
-      printf(" \"error\":\"ERROR: File read error!\"\n");
+      printf("  \"error\":\"ERROR: File read error!\"\n");
       printf("}\n");
       return (ERR);
+    }
+
+    // Get Bank type
+    switch (data[0x32]) {
+    case 4:
+      mode=MODE_EPS;
+      printf("  \"type\":\"EPS\",");
+      break;
+    case 0x17:
+      mode=MODE_E16;
+      printf("  \"type\":\"EPS16\",");
+      break;
+    case 0x1e:
+      mode=MODE_ASR;
+      printf("  \"type\":\"ASR\",");
+      break;
+    default:
+      printf("  \"error\":\"ERROR: Not an Ensoniq Bank file!\"\n");
+      printf("}\n");
+      return(ERR);
     }
 
      // Check Num of Blocks
