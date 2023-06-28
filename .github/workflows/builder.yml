@@ -36,4 +36,4 @@ jobs:
           wget http://simonowen.com/fdrawcmd/fdrawcmd.h
           gcc -v
           gcc EpsLin.c -o epslin.exe
-          ls -la
+          ls
