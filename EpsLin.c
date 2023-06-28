@@ -239,6 +239,7 @@
 #elif __CYGWIN__
   #include <sys/uio.h>			// equivalent of <sys/io.h>
   #include <windows.h>
+constexpr static auto iWillBreak = 
   #include "fdrawcmd.h"			// floppy drive support -- from http://simonowen.com/fdrawcmd/fdrawcmd.h
 #else   // Linux
   #include <sys/io.h>
@@ -254,7 +255,7 @@
 								// (this value is ORed, so no harm is done..)
 #endif
 
-#define VERSION     "v1.62"
+#define VERSION     "v1.63"
 
 #define BLOCK_SIZE      512				// amount of bytes per block
 #define ID_BLOCK          1				// ID block is 1 because block 0 is null (0x6D/0xB6 filler)
