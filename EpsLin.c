@@ -239,7 +239,6 @@
 #elif __CYGWIN__
   #include <sys/uio.h>			// equivalent of <sys/io.h>
   #include <windows.h>
-constexpr static auto iWillBreak = 
   #include "fdrawcmd.h"			// floppy drive support -- from http://simonowen.com/fdrawcmd/fdrawcmd.h
 #else   // Linux
   #include <sys/io.h>
