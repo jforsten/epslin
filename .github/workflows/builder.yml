@@ -25,10 +25,10 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v2
       - name: Set up Cygwin
-        uses: egor-tensin/setup-cygwin@v3
+        uses: egor-tensin/setup-cygwin@v3.0.1
         with:
           platform: x64
-          packages: gcc-g++ wget zip
+          packages: gcc-core cygwin64-gcc-g++ wget zip
      
       # Runs a set of commands using the runners shell
       - name: Run a multi-line script
@@ -41,7 +41,7 @@ jobs:
           C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
           C:\tools\cygwin\bin\bash.exe --login -c 'which gcc'
           C:\tools\cygwin\bin\bash.exe --login -c 'gcc -v'
-          C:\tools\cygwin\bin\bash.exe --login -c 'gcc /home/runneradmin/EpsLin.c -I/home/runneradmin -o /home/runneradmin/epslin.exe'
+          C:\tools\cygwin\bin\bash.exe --login -c 'gcc /home/runneradmin/EpsLin.c -I/home/runneradmin -v -o /home/runneradmin/epslin.exe'
           C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
           C:\tools\cygwin\bin\bash.exe --login -c 'zip epslin-win.zip epslin.exe cygwin1.dll'
           C:\tools\cygwin\bin\bash.exe --login -c 'cp /home/runneradmin/epslin-win.zip /cygdrive/d/a/epslin/epslin/'
