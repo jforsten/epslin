@@ -25,25 +25,15 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v2
       - name: Set up Cygwin
-        uses: egor-tensin/setup-cygwin@v4
+      - uses: secondlife/setup-cygwin@v1
         with:
           packages: gcc-core cygwin64-gcc-g++ wget zip
      
       # Runs a set of commands using the runners shell
       - name: Run a multi-line script
         run: |
-          C:\tools\cygwin\bin\bash.exe --login -c 'pwd'
-          C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
-          C:\tools\cygwin\bin\bash.exe --login -c '/usr/bin/wget http://simonowen.com/fdrawcmd/fdrawcmd.h'
-          C:\tools\cygwin\bin\bash.exe --login -c 'cp /cygdrive/d/a/epslin/epslin/EpsLin.c /home/runneradmin/'
-          C:\tools\cygwin\bin\bash.exe --login -c 'cp /usr/bin/cygwin1.dll /home/runneradmin/'
-          C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
-          C:\tools\cygwin\bin\bash.exe --login -c 'which gcc'
-          C:\tools\cygwin\bin\bash.exe --login -c 'gcc --help'
-          C:\tools\cygwin\bin\bash.exe --login -c 'gcc EpsLin.c -I/home/runneradmin -dumpdir /home/runneradmin -v -o epslin.exe'
-          C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
-          C:\tools\cygwin\bin\bash.exe --login -c 'zip epslin-win.zip epslin.exe cygwin1.dll'
-          C:\tools\cygwin\bin\bash.exe --login -c 'cp /home/runneradmin/epslin-win.zip /cygdrive/d/a/epslin/epslin/'
+          gcc -v
+          ls -la
       - uses: actions/upload-artifact@v2
         with:
           path: ./epslin-win.zip
