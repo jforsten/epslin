@@ -17,33 +17,110 @@ on:
 jobs:
   # This workflow contains a single job called "build"
   win:
-    # The type of runner that the job will run on
     runs-on: windows-latest
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
-      - name: Set up Cygwin
-        uses: egor-tensin/setup-cygwin@v4
+      - uses: actions/checkout@v3
+
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v3
         with:
-          packages: gcc-g++ wget zip
-     
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+          install-dir: C:\cygwin
+          packages: gcc-core gcc-g++ make zip wget
+
+      - name: building
         run: |
-          C:\tools\cygwin\bin\bash.exe --login -c 'pwd'
-          C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
-          C:\tools\cygwin\bin\bash.exe --login -c '/usr/bin/wget http://simonowen.com/fdrawcmd/fdrawcmd.h'
-          C:\tools\cygwin\bin\bash.exe --login -c 'cp /cygdrive/d/a/epslin/epslin/EpsLin.c /home/runneradmin/'
-          C:\tools\cygwin\bin\bash.exe --login -c 'cp /usr/bin/cygwin1.dll /home/runneradmin/'
-          C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
-          C:\tools\cygwin\bin\bash.exe --login -c 'gcc '/home/runneradmin/EpsLin.c -I/home/runneradmin -v -o '/home/runneradmin/epslin.exe'
-          C:\tools\cygwin\bin\bash.exe --login -c 'ls -la'
-          C:\tools\cygwin\bin\bash.exe --login -c 'zip epslin-win.zip epslin.exe cygwin1.dll'
-          C:\tools\cygwin\bin\bash.exe --login -c 'cp /home/runneradmin/epslin-win.zip /cygdrive/d/a/epslin/epslin/'
-      - uses: actions/upload-artifact@v2
+          ls
+          cd D:\a\epslin\epslin
+          wget http://simonowen.com/fdrawcmd/fdrawcmd.h
+          cp  c:cygwin/bin/cygwin1.dll ./
+          c:cygwin\bin\bash --login -c 'g++ -fpermissive /cygdrive/d/a/epslin/epslin/EpsLin.c -o /cygdrive/d/a/epslin/epslin/epslin.exe'
+          zip epslin-win.zip epslin.exe cygwin1.dll
+          ls
+      - uses: actions/upload-artifact@v3
         with:
           path: ./epslin-win.zip
           name: epslin-win
-          retention-days: 1
+  mac:
+    runs-on: macOS-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build
+        run: |
+          gcc EpsLin.c -o epslin
+          zip ./epslin-osx.zip ./epslin
+      - uses: actions/upload-artifact@v3
+        with:
+          path: ./epslin-osx.zip
+          name: epslin-osx
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build
+        run: |
+          gcc EpsLin.c -o epslin
+          zip ./epslin-linux.zip ./epslin
+      - uses: actions/upload-artifact@v3
+        with:
+          path: ./epslin-linux.zip
+          name: epslin-linux
+  release:
+    runs-on: ubuntu-latest
+    needs: [win, mac, linux]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Get current date
+      id: date
+      run: echo "MY_DATE=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+    
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+      with:
+        tag_name: ${{ env.MY_DATE }}
+        release_name: Release ${{ env.MY_DATE }}
+        body: |
+          Latest release
+        draft: false
+        prerelease: false
+    - uses: actions/download-artifact@v2
+    - name: Print dir  
+      run: |
+          tree
+    
+    - name: Upload Release Asset win
+      id: upload-release-asset-win
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+        asset_path: /home/runner/work/epslin/epslin/epslin-win/epslin-win.zip
+        asset_name: epslin-win.zip
+        asset_content_type: application/octet-stream
+
+    - name: Upload Release Asset osx
+      id: upload-release-asset-osx
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+        asset_path: /home/runner/work/epslin/epslin/epslin-osx/epslin-osx.zip
+        asset_name: epslin-osx.zip
+        asset_content_type: application/octet-stream
+  
+    - name: Upload Release Asset linux
+      id: upload-release-asset-linux
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+        asset_path: /home/runner/work/epslin/epslin/epslin-linux/epslin-linux.zip
+        asset_name: epslin-linux.zip
+        asset_content_type: application/octet-stream
+          
