@@ -32,7 +32,7 @@ jobs:
         run: |
           ls
           pwd
-          cd D:\a\epslin\epslin
+          cd C:\a\epslin\epslin
           ls
           wget http://simonowen.com/fdrawcmd/fdrawcmd.h
           ls
