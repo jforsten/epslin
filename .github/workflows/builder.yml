@@ -38,8 +38,8 @@ jobs:
           ls
           cp C:\cygwin\bin\cygwin1.dll
           ls
-          c:cygwin\bin\bash --login -c 'pwd'
-          c:cygwin\bin\bash --login -c 'g++ -fpermissive /cygdrive/c/a/epslin/epsli/EpsLin.c -o /cygdrive/c/a/epslin/epslin/epslin.exe'
+          c:\cygwin\bin\bash --login -c 'pwd'
+          c:\cygwin\bin\bash --login -c 'g++ -fpermissive /cygdrive/c/a/epslin/epsli/EpsLin.c -o /cygdrive/c/a/epslin/epslin/epslin.exe'
           zip epslin-win.zip epslin.exe cygwin1.dll
           ls
       - uses: actions/upload-artifact@v4
