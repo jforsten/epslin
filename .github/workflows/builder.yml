@@ -31,10 +31,13 @@ jobs:
       - name: building
         run: |
           ls
-          cd D:\a\epslin\epslin
+          pwd
+          # cd D:\a\epslin\epslin
           wget http://simonowen.com/fdrawcmd/fdrawcmd.h
-          cp  c:cygwin/bin/cygwin1.dll ./
-          c:cygwin\bin\bash --login -c 'g++ -fpermissive /cygdrive/d/a/epslin/epslin/EpsLin.c -o /cygdrive/d/a/epslin/epslin/epslin.exe'
+          cp c:cygwin/bin/cygwin1.dll ./
+          ls
+          c:cygwin\bin\bash --login -c 'pwd'
+          c:cygwin\bin\bash --login -c 'g++ -fpermissive /cygdrive/d/a/epslin/epsli/EpsLin.c -o /cygdrive/d/a/epslin/epslin/epslin.exe'
           zip epslin-win.zip epslin.exe cygwin1.dll
           ls
       - uses: actions/upload-artifact@v4
