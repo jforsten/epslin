@@ -16,31 +16,28 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
+  # Native Windows build (no Cygwin, no cygwin1.dll), cross-compiled with
+  # MinGW-w64 in Linux.
   win:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Cygwin
-        uses: cygwin/cygwin-install-action@v3
-        with:
-          install-dir: C:\cygwin
-          packages: gcc-core make zip wget
-
       - name: building
-        shell: pwsh
-        # The workspace is not always on C: (D:\a\epslin\epslin on newer
-        # runner images): use GITHUB_WORKSPACE, not a fixed path.
         run: |
-          $ErrorActionPreference = 'Stop'
-          Invoke-WebRequest https://simonowen.com/fdrawcmd/fdrawcmd.h -OutFile fdrawcmd.h
-          $src = C:\cygwin\bin\cygpath.exe -u "$env:GITHUB_WORKSPACE"
-          C:\cygwin\bin\bash.exe --login -c "cd '$src' && gcc EpsLin.c -o epslin.exe"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item C:\cygwin\bin\cygwin1.dll .
-          C:\cygwin\bin\zip.exe epslin-win.zip epslin.exe cygwin1.dll
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          set -e
+          # Only the win32-threads compiler (EpsLin uses no threads): half
+          # the download of gcc-mingw-w64-x86-64, which installs both
+          # variants. Timeout + retries: the Ubuntu mirror can be slow.
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          sudo apt-get update -q $APT_OPTS
+          sudo apt-get install -y -q --no-install-recommends $APT_OPTS gcc-mingw-w64-x86-64-win32
+          wget -q --timeout=30 --tries=3 https://simonowen.com/fdrawcmd/fdrawcmd.h
+          x86_64-w64-mingw32-gcc-win32 -static EpsLin.c -o epslin.exe
+          x86_64-w64-mingw32-objdump -p epslin.exe | grep "DLL Name"
+          zip epslin-win.zip epslin.exe
       - uses: actions/upload-artifact@v4
         with:
           path: ./epslin-win.zip
