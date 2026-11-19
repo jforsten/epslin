@@ -61,6 +61,11 @@
 //       - TODO: add recursive mode for GetEFE
 //       - TODO: create named sub-directories when GetEFE is used
 //               such as 'root', etc. to hold EFEs on export
+//  v1.69:
+//       - Format (-fi) of .ede/.eda names writes a Giebler EDE/EDA file
+//         (was a raw image with that name, which could not be opened);
+//         EDE needs size 'eps', EDA size 'asr'. GKH output is refused.
+//       - ConvertFromImage closes its files
 //  v1.68:
 //       - Fixed putting several EFEs into a sub-dir in one command: from
 //         the 2nd EFE on, the entry went to the parent dir
@@ -322,7 +327,7 @@
 // (this value is ORed, so no harm is done..)
 #endif
 
-#define VERSION "v1.68"
+#define VERSION "v1.69"
 
 #define BLOCK_SIZE 512    // amount of bytes per block
 #define ID_BLOCK 1        // ID block is 1 because block 0 is null (0x6D/0xB6 filler)
@@ -2287,6 +2292,10 @@ int ConvertFromImage(char in_file[FILENAME_MAX], char out_file[FILENAME_MAX], ch
 
   lseek(out, skip_start, SEEK_SET);
   write(out, SkipTable, skip_size);
+  // (closed: in Windows an open file can not be deleted, e.g. the temp image)
+  free(mem_pointer);
+  close(in);
+  close(out);
   return (OK);
 }
 
@@ -3742,6 +3751,10 @@ int FormatMedia(char **argv, int argc, int optind, char format_arg, char *disk_l
   long long i, j, k, image_size, total_blks, free_blks, fat_blks, storage_overhead;
   long long partial_blks, rest_blks;
   unsigned char buffer[BLOCK_SIZE], nsect, tracks;
+  char *path;                              // file to format
+  char edx_type = 0;                       // EDE_TYPE/EDA_TYPE: Giebler file
+  char raw_file[] = "EpsLinFmtXXXXXX";     // raw temp image for EDE/EDA
+  struct stat stat_buf;
 
   image_size = 0;
 
@@ -3780,8 +3793,44 @@ int FormatMedia(char **argv, int argc, int optind, char format_arg, char *disk_l
       exit(ERR);
     }
 
+    // EDE/EDA (Giebler) names: format a raw temp image and convert it to
+    // the named file at the end. An existing EDE/EDA is converted to the
+    // temp image first.
+    path = argv[optind];
+    GetImageType(path, &edx_type);
+    if (edx_type == GKH_TYPE)
+    {
+      EEXIT((stderr, "ERROR: GKH output not supported yet!\n"));
+    }
+    if ((edx_type == EDE_TYPE) || (edx_type == EDA_TYPE))
+    {
+      if ((file = mkstemp(raw_file)) < 0)
+      {
+        perror("mkstemp");
+        exit(ERR);
+      }
+      close(file);
+      if (stat(path, &stat_buf) == 0)
+      {
+        if (ConvertToImage(path, raw_file) != OK)
+        {
+          unlink(raw_file);
+          EEXIT((stderr, "ERROR: Couldn't read '%s'. \n", path));
+        }
+      }
+      else
+      {
+        unlink(raw_file); // created below with the given size
+      }
+      path = raw_file;
+    }
+    else
+    {
+      edx_type = 0;
+    }
+
     // Check if file already exists or not.
-    if ((file = open(argv[optind], O_RDWR | O_BINARY)) != -1)
+    if ((file = open(path, O_RDWR | O_BINARY)) != -1)
     {
 
       // File already exists, so get its size...
@@ -3908,11 +3957,21 @@ int FormatMedia(char **argv, int argc, int optind, char format_arg, char *disk_l
         exit(ERR);
       }
 
+      // EDE holds an EPS disk (800K), EDA an ASR disk (1600K)
+      if ((edx_type == EDE_TYPE) && (image_size != EPS_IMAGE_SIZE))
+      {
+        EEXIT((stderr, "ERROR: An EDE image is an EPS disk: use size 'eps'. \n"));
+      }
+      if ((edx_type == EDA_TYPE) && (image_size != ASR_IMAGE_SIZE))
+      {
+        EEXIT((stderr, "ERROR: An EDA image is an ASR disk: use size 'asr'. \n"));
+      }
+
       // Calculate amount of blocks since image_size is set in bytes.
       total_blks = image_size / BLOCK_SIZE;
 
       // create file
-      file = open(argv[optind], O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS);
+      file = open(path, O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS);
 
       // Make empty file
       // 1st clear the buffer
@@ -4067,6 +4126,13 @@ int FormatMedia(char **argv, int argc, int optind, char format_arg, char *disk_l
     printf("\rWriting filesystem....  OK! \n");
     fflush(stdout);
     close(file);
+
+    // EDE/EDA: write the formatted image to the named Giebler file
+    if (edx_type != 0)
+    {
+      ConvertFromImage(raw_file, argv[optind], edx_type);
+      unlink(raw_file);
+    }
   } // case
   return (OK);
 }
