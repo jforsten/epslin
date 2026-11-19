@@ -61,6 +61,11 @@
 //       - TODO: add recursive mode for GetEFE
 //       - TODO: create named sub-directories when GetEFE is used
 //               such as 'root', etc. to hold EFEs on export
+//  v1.67:
+//       - Images and devices over 4GB: 64-bit sizes in listings, check
+//         (-C), image copy (-I) and image size (-fi); 64-bit file offsets
+//         also on 32-bit systems (_FILE_OFFSET_BITS) and in the native
+//         Windows build (offset casts no longer through 32-bit off_t)
 //  v1.66:
 //       - Native Windows build (MinGW-w64) without Cygwin: raw device
 //         access (/dev/sdX, \\.\PhysicalDriveN) in whole sectors, see
@@ -266,6 +271,15 @@
 #define EPSLIN_WINAPI
 #endif
 
+// Images and devices over 2GB: 64-bit file offsets also on 32-bit systems
+// (e.g. Raspberry Pi OS). The native Windows section uses 64-bit offsets
+// itself; there the C99 printf of MinGW is used for "%llu".
+#ifdef EPSLIN_NATIVE_WIN
+#define __USE_MINGW_ANSI_STDIO 1
+#elif !defined(_FILE_OFFSET_BITS)
+#define _FILE_OFFSET_BITS 64
+#endif
+
 #include <ctype.h>
 #include <stdio.h>
 #include <errno.h>
@@ -304,7 +318,7 @@
 // (this value is ORed, so no harm is done..)
 #endif
 
-#define VERSION "v1.66"
+#define VERSION "v1.67"
 
 #define BLOCK_SIZE 512    // amount of bytes per block
 #define ID_BLOCK 1        // ID block is 1 because block 0 is null (0x6D/0xB6 filler)
@@ -715,17 +729,25 @@ static int epslin_close(int fd)
   return 0;
 }
 
-// Devices exist with size 0 (as in Cygwin), files as usual.
+// Devices exist with size 0 (as in Cygwin), files as usual. Files over
+// 2GB (which the 32-bit 'stat' refuses) get the largest size 'st_size'
+// holds: sizes are only compared with floppy image sizes or are EFE sizes.
 static int epslin_stat(const char *path, struct stat *buf)
 {
   char dev_path[MAX_PATH];
+  struct _stat64 st;
 
+  memset(buf, 0, sizeof(*buf));
   if (WinDevicePath(path, dev_path, sizeof(dev_path)))
-  {
-    memset(buf, 0, sizeof(*buf));
     return 0;
-  }
-  return stat(path, buf);
+  if (_stat64(path, &st) != 0)
+    return -1;
+  buf->st_mode = st.st_mode;
+  buf->st_size = (st.st_size > 0x7fffffff) ? 0x7fffffff : (_off_t)st.st_size;
+  buf->st_atime = st.st_atime;
+  buf->st_mtime = st.st_mtime;
+  buf->st_ctime = st.st_ctime;
+  return 0;
 }
 
 // The rest of the program uses these
@@ -1182,11 +1204,11 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
     printf(" \"file\":\"%s\",\n", in_file);
     printf(" \"label\":\"%s\",\n", DiskLabel);
     printf(" \"used_blocks\":%u,\n", used_blks);
-    printf(" \"used_bytes\":%lu,\n", (unsigned long)(used_blks)*512);
+    printf(" \"used_bytes\":%llu,\n", (unsigned long long)(used_blks)*512);
     printf(" \"free_blocks\":%u,\n", free_blks);
-    printf(" \"free_bytes\":%lu,\n", (unsigned long)(free_blks)*512);
+    printf(" \"free_bytes\":%llu,\n", (unsigned long long)(free_blks)*512);
     printf(" \"total_blocks\":%u,\n", free_blks + used_blks);
-    printf(" \"total_bytes\":%lu,\n", (unsigned long)(free_blks + used_blks) * 512);
+    printf(" \"total_bytes\":%llu,\n", (unsigned long long)(free_blks + used_blks) * 512);
     printf(" \"items\":[\n");
   }
 
@@ -1322,10 +1344,10 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
   if (printmode == HUMAN_READABLE)
   {
     printf("------+----------+--------------+---------+---------------------------------+\n");
-    printf(" Used:  %23u Blocks    |  Used: %16lu Bytes   |\n", used_blks, (unsigned long)(used_blks)*512);
-    printf(" Free:  %23u Blocks    |  Free: %16lu Bytes   |\n", free_blks, (unsigned long)(free_blks)*512);
+    printf(" Used:  %23u Blocks    |  Used: %16llu Bytes   |\n", used_blks, (unsigned long long)(used_blks)*512);
+    printf(" Free:  %23u Blocks    |  Free: %16llu Bytes   |\n", free_blks, (unsigned long long)(free_blks)*512);
     printf("----------------------------------------------------------------------------+\n");
-    printf(" Total: %23u Blocks    |  Total:%16lu Bytes   |\n", free_blks + used_blks, (unsigned long)(free_blks + used_blks) * 512);
+    printf(" Total: %23u Blocks    |  Total:%16llu Bytes   |\n", free_blks + used_blks, (unsigned long long)(free_blks + used_blks) * 512);
     printf("----------------------------------------------------------------------------+\n\n");
   }
 }
@@ -2246,7 +2268,7 @@ int ConvertFromImage(char in_file[FILENAME_MAX], char out_file[FILENAME_MAX], ch
       else
       {
         // otherwise write the used block as normal
-        lseek(in, (off_t)block * BLOCK_SIZE, SEEK_SET);
+        lseek(in, (long long)block * BLOCK_SIZE, SEEK_SET);
         read(in, Data, BLOCK_SIZE);
         write(out, Data, BLOCK_SIZE);
       }
@@ -3500,7 +3522,7 @@ int ReadBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block
     printf("Num_of_blocks=%d <-> total_blocks=%d \n", num_of_blocks, pre_blocks + cont_blocks + post_blocks);
 #endif
 
-    if ((lseek(file, (off_t)(start_block / 4) * 2048, SEEK_SET)) < 0)
+    if ((lseek(file, (long long)(start_block / 4) * 2048, SEEK_SET)) < 0)
     {
       perror("seek");
     }
@@ -3544,7 +3566,7 @@ int ReadBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block
     }
 
 #else // Linux
-    if (lseek(file, (off_t)start_block * BLOCK_SIZE, SEEK_SET) == -1)
+    if (lseek(file, (long long)start_block * BLOCK_SIZE, SEEK_SET) == -1)
     {
       printf("ERROR in seek! \n");
       exit(ERR);
@@ -3623,7 +3645,7 @@ int WriteBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_bloc
 #ifdef __CYGWIN__
   case 's':
 #endif
-    lseek(file, (off_t)start_block * BLOCK_SIZE, SEEK_SET);
+    lseek(file, (long long)start_block * BLOCK_SIZE, SEEK_SET);
     write(file, buffer, BLOCK_SIZE * length);
     return (OK);
 
@@ -3851,7 +3873,7 @@ int FormatMedia(char **argv, int argc, int optind, char format_arg, char *disk_l
         else
         {
           // specific size is taken from numeric command line argument
-          image_size = atol(argv[optind + 1]);
+          image_size = atoll(argv[optind + 1]); // (atol: 32-bit in Windows)
 
           if (image_size == 0)
           {
@@ -4701,7 +4723,7 @@ int PutEFE(
             mem_pointer = malloc(BLOCK_SIZE * EFE_blks);
 
             // Copy Blocks to buffer
-            lseek(out, (off_t)BLOCK_SIZE * free_start, SEEK_SET);
+            lseek(out, (long long)BLOCK_SIZE * free_start, SEEK_SET);
             for (j = 0; j < EFE_blks; j++)
             {
 
@@ -5928,7 +5950,7 @@ void CheckMedia(char media_type, FD_HANDLE fd, int file, int check_level)
   unsigned long i, j, count, used_blks;
   unsigned char buffer[BLOCK_SIZE], *root_dir;
   unsigned long total_blks, free_blks;
-  unsigned long file_size;
+  unsigned long long file_size = 0; // 64-bit: 'long' is 32-bit in Windows
 
   // Get File/Device info
 #ifdef __CYGWIN__
@@ -5960,7 +5982,7 @@ void CheckMedia(char media_type, FD_HANDLE fd, int file, int check_level)
 #endif
   }
 
-  printf("\nFile/Device size: %ld bytes (%ld blocks) \n\n", file_size, file_size / BLOCK_SIZE);
+  printf("\nFile/Device size: %llu bytes (%llu blocks) \n\n", file_size, file_size / BLOCK_SIZE);
 
   // ID Block
 
@@ -5982,10 +6004,11 @@ void CheckMedia(char media_type, FD_HANDLE fd, int file, int check_level)
                 (buffer[15] << 16) +
                 (buffer[16] << 8) +
                 (buffer[17] & 0x000000ff));
-  printf("Total Blocks           : %ld(%x%x%x%x) (%ld Bytes = %ld KBytes = %ld MBytes)\n",
+  printf("Total Blocks           : %ld(%x%x%x%x) (%llu Bytes = %llu KBytes = %llu MBytes)\n",
          total_blks,
          buffer[14], buffer[15], buffer[16], buffer[17],
-         total_blks * 512, total_blks * 512 / 1024, total_blks * 512 / 1024 / 1024);
+         (unsigned long long)total_blks * 512, (unsigned long long)total_blks * 512 / 1024,
+         (unsigned long long)total_blks * 512 / 1024 / 1024);
 
   printf("SCSI Medium type       : %d(%x)\n", buffer[18], buffer[18]);
   printf("SCSI Density Code      : %d(%x)\n", buffer[19], buffer[19]);
@@ -6134,12 +6157,13 @@ int ImageCopy(char *source_file_name, char *target_file_name)
 {
   // FILE *source, *target;
   unsigned int i = 0;
-  unsigned long source_file_size, target_file_size;
+  // 64-bit sizes: 'long' is 32-bit in Windows (images/devices over 4GB)
+  unsigned long long source_file_size, target_file_size;
   unsigned char buffer[IMAGE_COPY_BUFFER_BLOCKS * BLOCK_SIZE];
 
   int source, target;
   int read_bytes, write_bytes; // signed: read/write return -1 on error
-  unsigned long chunks;
+  unsigned long long chunks;
 
   printf("\n");
 
@@ -6181,7 +6205,7 @@ int ImageCopy(char *source_file_name, char *target_file_name)
   {
     if (source_file_size > target_file_size)
     {
-      EEXIT((stderr, "ERROR: Couldn't fit! \nSource '%s' is BIGGER that target '%s'. \n\nSource size: %ld Bytes, target size %ld Bytes \n\n",
+      EEXIT((stderr, "ERROR: Couldn't fit! \nSource '%s' is BIGGER that target '%s'. \n\nSource size: %llu Bytes, target size %llu Bytes \n\n",
              source_file_name, target_file_name, source_file_size, target_file_size));
     }
   }
@@ -6217,7 +6241,7 @@ int ImageCopy(char *source_file_name, char *target_file_name)
     chunks = (source_file_size / BLOCK_SIZE) / IMAGE_COPY_BUFFER_BLOCKS;
     if (chunks == 0)
       chunks = 1;
-    printf("\rCopying image file... %lu%% completed", ((100 * (unsigned long)i++) / chunks));
+    printf("\rCopying image file... %llu%% completed", ((100 * (unsigned long long)i++) / chunks));
 
     write_bytes = write(target, buffer, read_bytes);
     if (write_bytes < 0)
@@ -6227,7 +6251,7 @@ int ImageCopy(char *source_file_name, char *target_file_name)
     }
   } while (read_bytes == (IMAGE_COPY_BUFFER_BLOCKS * BLOCK_SIZE));
 
-  printf("\rImage copy from '%s' to '%s' done! Total %ld Bytes copied. \n", source_file_name, target_file_name, source_file_size);
+  printf("\rImage copy from '%s' to '%s' done! Total %llu Bytes copied. \n", source_file_name, target_file_name, source_file_size);
   fflush(stdout);
 
   close(source);
