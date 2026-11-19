@@ -20,6 +20,7 @@ jobs:
   # MinGW-w64 in Linux.
   win:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -27,10 +28,14 @@ jobs:
       - name: building
         run: |
           set -e
-          sudo apt-get update -q
-          sudo apt-get install -y -q gcc-mingw-w64-x86-64
-          wget -q https://simonowen.com/fdrawcmd/fdrawcmd.h
-          x86_64-w64-mingw32-gcc -static EpsLin.c -o epslin.exe
+          # Only the win32-threads compiler (EpsLin uses no threads): half
+          # the download of gcc-mingw-w64-x86-64, which installs both
+          # variants. Timeout + retries: the Ubuntu mirror can be slow.
+          APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30"
+          sudo apt-get update -q $APT_OPTS
+          sudo apt-get install -y -q --no-install-recommends $APT_OPTS gcc-mingw-w64-x86-64-win32
+          wget -q --timeout=30 --tries=3 https://simonowen.com/fdrawcmd/fdrawcmd.h
+          x86_64-w64-mingw32-gcc-win32 -static EpsLin.c -o epslin.exe
           x86_64-w64-mingw32-objdump -p epslin.exe | grep "DLL Name"
           zip epslin-win.zip epslin.exe
       - uses: actions/upload-artifact@v4
