@@ -29,13 +29,17 @@
 //
 //    gcc EpsLin.c -o epslin
 //
-//  In Windows you have to install "fdrawcmd.sys" from
-//         http://simonowen.com/fdrawcmd/
+//  Windows without Cygwin (no cygwin1.dll needed), with MinGW-w64
+//  (also as a cross compiler in Linux):
 //
-//  and get the header file from
+//    x86_64-w64-mingw32-gcc EpsLin.c -o epslin.exe
+//
+//  In Windows you have to get the header file from
 //         http://simonowen.com/fdrawcmd/fdrawcmd.h
 //
-//  and put it in the same directory as the EpsLin source.
+//  and put it in the same directory as the EpsLin source. For floppy
+//  access also install "fdrawcmd.sys" from
+//         http://simonowen.com/fdrawcmd/
 //
 //  HISTORY
 //  =======
@@ -57,6 +61,11 @@
 //       - TODO: add recursive mode for GetEFE
 //       - TODO: create named sub-directories when GetEFE is used
 //               such as 'root', etc. to hold EFEs on export
+//  v1.66:
+//       - Native Windows build (MinGW-w64) without Cygwin: raw device
+//         access (/dev/sdX, \\.\PhysicalDriveN) in whole sectors, see
+//         "NATIVE WINDOWS". Linux, macOS and Cygwin builds unchanged.
+//       - Temp file from mkstemp is closed before it is used by name
 //  v1.65:
 //       - Fixed crash in MkDir (-m)
 //       - Fixed parent dir update when parent is root: the ID block was
@@ -248,6 +257,15 @@
 // Uncomment to enter debug state...
 // #define DEBUG
 
+// Native Windows build (MinGW-w64, no Cygwin): see "NATIVE WINDOWS" below.
+#if defined(_WIN32) && !defined(__CYGWIN__)
+#define EPSLIN_NATIVE_WIN
+#endif
+// Win32 API in use (Cygwin or native Windows): floppy access via fdrawcmd.
+#if defined(__CYGWIN__) || defined(EPSLIN_NATIVE_WIN)
+#define EPSLIN_WINAPI
+#endif
+
 #include <ctype.h>
 #include <stdio.h>
 #include <errno.h>
@@ -256,14 +274,18 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#ifndef EPSLIN_NATIVE_WIN
 #include <sys/ioctl.h>
+#endif
 #include <libgen.h>
 #include <dirent.h>
 
 #ifdef __APPLE__
 #include <sys/uio.h> // equivalent of <sys/io.h>
-#elif __CYGWIN__
+#elif defined(EPSLIN_WINAPI)
+#ifdef __CYGWIN__
 #include <sys/uio.h> // equivalent of <sys/io.h>
+#endif
 #include <windows.h>
 #include "fdrawcmd.h" // floppy drive support -- from http://simonowen.com/fdrawcmd/fdrawcmd.h
 #else                 // Linux
@@ -276,15 +298,13 @@
 #include <linux/fdreg.h> // floppy drive support
 #endif
 
-#ifdef __CYGWIN__  // Windows
-                   // do nothing
-#else              // Linux and macOS
+#ifndef O_BINARY  // Windows (Cygwin, native) defines it
 #define O_BINARY 0 // In Windows, open is set to binary mode.
 // In Linux, this is not defined so set it to 0
 // (this value is ORed, so no harm is done..)
 #endif
 
-#define VERSION "v1.65"
+#define VERSION "v1.66"
 
 #define BLOCK_SIZE 512    // amount of bytes per block
 #define ID_BLOCK 1        // ID block is 1 because block 0 is null (0x6D/0xB6 filler)
@@ -382,13 +402,13 @@
 #endif
 
 // Datatype for floppy disk access
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
 typedef HANDLE FD_HANDLE;
 #else // Linux and macOS
 typedef int FD_HANDLE;
 #endif
 
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
 char *LastError()
 {
   static char sz[256];
@@ -397,6 +417,328 @@ char *LastError()
   return GetLastError() ? sz : "no error";
 }
 #endif
+
+#ifdef EPSLIN_NATIVE_WIN
+/////////////////////////////////////////////////////
+// NATIVE WINDOWS (no Cygwin)
+// ===========================
+// Built with MinGW-w64, EpsLin runs without cygwin1.dll:
+//
+//    x86_64-w64-mingw32-gcc EpsLin.c -o epslin.exe
+//
+// The rest of the program uses POSIX open/read/write/lseek/close/stat as
+// on Linux; this section maps them to
+//  - the C runtime (_open, _read, ...) for files, and
+//  - Win32 CreateFile/ReadFile/WriteFile for raw devices:
+//      /dev/sdX   (Cygwin names: sda = \\.\PhysicalDrive0, sdb = 1, ...)
+//      /dev/scdN  (\\.\CdRomN)
+//      \\.\PhysicalDriveN
+//      /Device/HarddiskN/Partition0 (/dev/sdX as Git Bash passes it)
+//
+// Windows reads and writes raw devices only in whole sectors at sector
+// offsets, but EpsLin also writes single FAT entries (3 bytes), dir entries
+// (26 bytes) etc. Device access therefore goes through a sector buffer
+// (read-modify-write), as Cygwin does. Reads stop at the end of the device
+// (reading past the end can stall a SCSI2SD).
+//
+// Raw devices need administrator rights, or device access rights that allow
+// the user to read and write them.
+/////////////////////////////////////////////////////
+
+#include <io.h>
+#include <stdarg.h>
+#include <winioctl.h>
+
+#define WIN_DEV_FD_BASE 10000      // pseudo file descriptors for devices
+#define WIN_DEV_MAX 8              // devices open at the same time
+#define WIN_DEV_CHUNK (256 * 512)  // max. bytes per ReadFile/WriteFile
+
+typedef struct
+{
+  HANDLE h;            // NULL: slot is free
+  long long pos;       // current offset in bytes
+  long long size;      // device size in bytes, -1 if unknown
+  unsigned int sector; // bytes per sector
+} WinDevice;
+
+static WinDevice win_devices[WIN_DEV_MAX];
+
+// Win32 path of a device name; returns 0 if 'path' is not a device.
+static int WinDevicePath(const char *path, char *out, size_t out_size)
+{
+  if (strncmp(path, "/dev/sd", 7) == 0 && path[7] >= 'a' && path[7] <= 'z' && path[8] == '\0')
+  {
+    snprintf(out, out_size, "\\\\.\\PhysicalDrive%d", path[7] - 'a');
+    return 1;
+  }
+  if (strncmp(path, "/dev/scd", 8) == 0 && isdigit((unsigned char)path[8]))
+  {
+    snprintf(out, out_size, "\\\\.\\CdRom%s", path + 8);
+    return 1;
+  }
+  // Git Bash (MSYS) turns /dev/sde into /Device/Harddisk4/Partition0
+  {
+    int n;
+    char rest[16];
+    if (sscanf(path, "/Device/Harddisk%d/%15s", &n, rest) == 2 && strcmp(rest, "Partition0") == 0)
+    {
+      snprintf(out, out_size, "\\\\.\\PhysicalDrive%d", n);
+      return 1;
+    }
+  }
+  if ((path[0] == '\\' || path[0] == '/') && (path[1] == '\\' || path[1] == '/') &&
+      path[2] == '.' && (path[3] == '\\' || path[3] == '/'))
+  {
+    snprintf(out, out_size, "\\\\.\\%s", path + 4);
+    return 1;
+  }
+  return 0;
+}
+
+static WinDevice *WinDev(int fd)
+{
+  if (fd >= WIN_DEV_FD_BASE && fd < WIN_DEV_FD_BASE + WIN_DEV_MAX &&
+      win_devices[fd - WIN_DEV_FD_BASE].h != NULL)
+    return &win_devices[fd - WIN_DEV_FD_BASE];
+  return NULL;
+}
+
+static void WinSetErrno(void)
+{
+  switch (GetLastError())
+  {
+  case ERROR_ACCESS_DENIED:
+  case ERROR_WRITE_PROTECT:
+    errno = EACCES;
+    break;
+  case ERROR_FILE_NOT_FOUND:
+  case ERROR_PATH_NOT_FOUND:
+    errno = ENOENT;
+    break;
+  default:
+    errno = EIO;
+  }
+}
+
+// Read or write 'len' bytes (whole sectors) at 'offset', in chunks.
+static int WinDevTransfer(HANDLE h, long long offset, unsigned char *buf, size_t len, int writing)
+{
+  while (len > 0)
+  {
+    DWORD n = (len > WIN_DEV_CHUNK) ? WIN_DEV_CHUNK : (DWORD)len;
+    DWORD done = 0;
+    LARGE_INTEGER li;
+    BOOL ok;
+
+    li.QuadPart = offset;
+    if (!SetFilePointerEx(h, li, NULL, FILE_BEGIN))
+      return -1;
+    ok = writing ? WriteFile(h, buf, n, &done, NULL) : ReadFile(h, buf, n, &done, NULL);
+    if (!ok || done != n)
+      return -1;
+    offset += n;
+    buf += n;
+    len -= n;
+  }
+  return 0;
+}
+
+// Read or write 'count' bytes at the current offset of a device.
+static int WinDevIO(WinDevice *d, unsigned char *buf, size_t count, int writing)
+{
+  long long start = d->pos - d->pos % d->sector;
+  long long end = d->pos + (long long)count;
+  unsigned char *tmp;
+  int rc;
+
+  if (end % d->sector)
+    end += d->sector - end % d->sector;
+
+  // Whole sectors: transfer directly
+  if (start == d->pos && end - start == (long long)count)
+    return WinDevTransfer(d->h, start, buf, count, writing);
+
+  // Partial sectors: through a buffer of whole sectors
+  if ((tmp = malloc((size_t)(end - start))) == NULL)
+  {
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return -1;
+  }
+  rc = WinDevTransfer(d->h, start, tmp, (size_t)(end - start), 0);
+  if (rc == 0)
+  {
+    if (writing)
+    {
+      memcpy(tmp + (d->pos - start), buf, count);
+      rc = WinDevTransfer(d->h, start, tmp, (size_t)(end - start), 1);
+    }
+    else
+    {
+      memcpy(buf, tmp + (d->pos - start), count);
+    }
+  }
+  free(tmp);
+  return rc;
+}
+
+static int epslin_open(const char *path, int flags, ...)
+{
+  char dev_path[MAX_PATH];
+  int mode = 0, i;
+  WinDevice *d;
+  DISK_GEOMETRY geometry;
+  GET_LENGTH_INFORMATION length;
+  DWORD n;
+
+  if (flags & O_CREAT)
+  {
+    va_list ap;
+    va_start(ap, flags);
+    mode = va_arg(ap, int);
+    va_end(ap);
+  }
+  if (!WinDevicePath(path, dev_path, sizeof(dev_path)))
+    return _open(path, flags, mode);
+
+  for (i = 0; i < WIN_DEV_MAX && win_devices[i].h != NULL; i++)
+    ;
+  if (i == WIN_DEV_MAX)
+  {
+    errno = EMFILE;
+    return -1;
+  }
+  d = &win_devices[i];
+  d->h = CreateFileA(dev_path, GENERIC_READ | ((flags & (O_WRONLY | O_RDWR)) ? GENERIC_WRITE : 0),
+                     FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+  if (d->h == INVALID_HANDLE_VALUE)
+  {
+    d->h = NULL;
+    WinSetErrno();
+    return -1;
+  }
+  d->pos = 0;
+  d->sector = 512;
+  if (DeviceIoControl(d->h, IOCTL_DISK_GET_DRIVE_GEOMETRY, NULL, 0, &geometry, sizeof(geometry), &n, NULL) &&
+      geometry.BytesPerSector >= 512)
+    d->sector = geometry.BytesPerSector;
+  d->size = -1;
+  if (DeviceIoControl(d->h, IOCTL_DISK_GET_LENGTH_INFO, NULL, 0, &length, sizeof(length), &n, NULL))
+    d->size = length.Length.QuadPart;
+  return WIN_DEV_FD_BASE + i;
+}
+
+static int epslin_read(int fd, void *buf, unsigned int count)
+{
+  WinDevice *d = WinDev(fd);
+
+  if (d == NULL)
+    return _read(fd, buf, count);
+  // Stop at the end of the device
+  if (d->size >= 0)
+  {
+    if (d->pos >= d->size)
+      return 0;
+    if ((long long)count > d->size - d->pos)
+      count = (unsigned int)(d->size - d->pos);
+  }
+  if (count == 0)
+    return 0;
+  if (WinDevIO(d, buf, count, 0) < 0)
+  {
+    WinSetErrno();
+    return -1;
+  }
+  d->pos += count;
+  return (int)count;
+}
+
+static int epslin_write(int fd, const void *buf, unsigned int count)
+{
+  WinDevice *d = WinDev(fd);
+
+  if (d == NULL)
+    return _write(fd, buf, count);
+  if (d->size >= 0 && d->pos + (long long)count > d->size)
+  {
+    errno = ENOSPC;
+    return -1;
+  }
+  if (count == 0)
+    return 0;
+  if (WinDevIO(d, (unsigned char *)buf, count, 1) < 0)
+  {
+    WinSetErrno();
+    return -1;
+  }
+  d->pos += count;
+  return (int)count;
+}
+
+static long long epslin_lseek(int fd, long long offset, int whence)
+{
+  WinDevice *d = WinDev(fd);
+  long long base;
+
+  if (d == NULL)
+    return _lseeki64(fd, offset, whence);
+  switch (whence)
+  {
+  case SEEK_SET:
+    base = 0;
+    break;
+  case SEEK_CUR:
+    base = d->pos;
+    break;
+  case SEEK_END:
+    base = d->size;
+    break;
+  default:
+    base = -1;
+  }
+  if (base < 0 || base + offset < 0)
+  {
+    errno = EINVAL;
+    return -1;
+  }
+  d->pos = base + offset;
+  return d->pos;
+}
+
+static int epslin_close(int fd)
+{
+  WinDevice *d = WinDev(fd);
+
+  if (d == NULL)
+    return _close(fd);
+  CloseHandle(d->h);
+  d->h = NULL;
+  return 0;
+}
+
+// Devices exist with size 0 (as in Cygwin), files as usual.
+static int epslin_stat(const char *path, struct stat *buf)
+{
+  char dev_path[MAX_PATH];
+
+  if (WinDevicePath(path, dev_path, sizeof(dev_path)))
+  {
+    memset(buf, 0, sizeof(*buf));
+    return 0;
+  }
+  return stat(path, buf);
+}
+
+// The rest of the program uses these
+#define open epslin_open
+#define read(fd, buf, count) epslin_read((fd), (buf), (count))
+#define write(fd, buf, count) epslin_write((fd), (buf), (count))
+#define lseek(fd, offset, whence) epslin_lseek((fd), (offset), (whence))
+#define close(fd) epslin_close(fd)
+#define stat(path, buf) epslin_stat((path), (buf))
+#define index(s, c) strchr((s), (c))
+#define rindex(s, c) strrchr((s), (c))
+
+#endif // EPSLIN_NATIVE_WIN
 
 // Temp-file name
 static char tmp_file[13] = "EpsLinXXXXXX";
@@ -2090,7 +2432,7 @@ FD_HANDLE OpenFloppy(int drive)
 {
   FD_HANDLE fd;
 
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
   DWORD dwRet;
   char szDevice[32];
   DWORD dwVersion = 0;
@@ -2146,7 +2488,7 @@ FD_HANDLE OpenFloppy(int drive)
 // CloseFloppy
 void CloseFloppy(FD_HANDLE fd)
 {
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
   CloseHandle(fd);
 #elif __APPLE__
   // macOS, so do nothing
@@ -2159,7 +2501,7 @@ void CloseFloppy(FD_HANDLE fd)
 // Set FD geometry. 'a'=ASR, 'e'=EPS
 void FD_SetGeometry(FD_HANDLE fd, char disk_type)
 {
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
   DWORD dwRet;
   BYTE DataRate;
 
@@ -2216,7 +2558,7 @@ void FD_SetGeometry(FD_HANDLE fd, char disk_type)
 void FD_Calibrate(int fd)
 {
 
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
   // do nothing
 #elif __APPLE__
   // macOS, so do nothing
@@ -2242,7 +2584,7 @@ void FD_Calibrate(int fd)
 void FD_Seek(FD_HANDLE fd, int track)
 {
 
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
   DWORD dwRet;
   FD_SEEK_PARAMS sp;
 
@@ -2282,7 +2624,7 @@ void FD_Seek(FD_HANDLE fd, int track)
 // (read: rw=1, write: rw=2)
 int FD_RawRW_DiskTrack(FD_HANDLE fd, char disk_type, int track, int head, unsigned char *buffer, int rw)
 {
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
   unsigned int datalen;
   DWORD dwRet;
   FD_READ_WRITE_PARAMS rwp;
@@ -2401,7 +2743,7 @@ int FD_RawRW_DiskSectors(FD_HANDLE fd, char disk_type, int track, int head,
                          int sector, int num_of_sectors, unsigned char *buffer, int rw)
 {
 
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
   unsigned int datalen;
   DWORD dwRet;
   FD_READ_WRITE_PARAMS rwp;
@@ -2500,7 +2842,7 @@ int FD_RawRW_DiskSectors(FD_HANDLE fd, char disk_type, int track, int head,
   return (OK);
 }
 
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
 // do nothing
 #elif __APPLE__
 // macOS, so do nothing
@@ -2522,7 +2864,7 @@ typedef FormatHeader FormatHeaders[MAX_DISK_SECT];
 int FD_Format_DiskTrack(FD_HANDLE fd, unsigned int track, unsigned int head, unsigned int nsect, int rate, int skew)
 {
 
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
   DWORD dwRet;
   BYTE abFormat[sizeof(FD_FORMAT_PARAMS) + sizeof(FD_ID_HEADER) * 20];
 
@@ -2967,11 +3309,14 @@ void FD_RW_Disk(char in_file[FILENAME_MAX], int rw_disk)
   {
     // Generate tmp-file and bind the clean-up for it
     // tmpnam(tmp_file);
-    if (mkstemp(tmp_file) == -1)
+    // (mkstemp opens the file: close it, it is opened again by name;
+    // in Windows the open file can not be opened a second time)
+    if ((file = mkstemp(tmp_file)) == -1)
     {
       perror("mkstemp");
       exit(ERR);
     }
+    close(file);
 
     atexit(CleanTmpFile);
     convert = 1;
@@ -5316,7 +5661,11 @@ void GetMedia(char *arg, int argc, char *media_type, char *image_type,
 
       // Generate tmp-file and bind the clean-up for it
       // tmpnam(tmp_file);
-      mkstemp(tmp_file);
+      // (mkstemp opens the file: close it, it is opened again by name;
+      // in Windows the open file can not be opened a second time)
+      int tmp_fd;
+      if ((tmp_fd = mkstemp(tmp_file)) >= 0)
+        close(tmp_fd);
       atexit(CleanTmpFile);
 
       if (ConvertToImage(in_file, tmp_file) == OK)
@@ -5599,7 +5948,7 @@ void CheckMedia(char media_type, FD_HANDLE fd, int file, int check_level)
   else
   {
     // DISK ACCESS
-#ifdef __CYGWIN__
+#ifdef EPSLIN_WINAPI
     // How to do this in Windows!?
 
 #else // Linux and macOS
