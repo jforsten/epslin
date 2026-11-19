@@ -57,6 +57,26 @@
 //       - TODO: add recursive mode for GetEFE
 //       - TODO: create named sub-directories when GetEFE is used
 //               such as 'root', etc. to hold EFEs on export
+//  v1.65:
+//       - Fixed crash in MkDir (-m)
+//       - Fixed parent dir update when parent is root: the ID block was
+//         used as the 2nd root dir block ("DR" written to the ID block)
+//       - Fixed PutEFE writing entries >= 20 of a fragmented sub-dir
+//         over another file's block
+//       - Fixed false "corrupted FAT" error (FAT left without end mark)
+//         when a fragmented EFE ends at the last block of the disk
+//       - Fixed dir tail bytes (before "DR") left uninitialized
+//       - Fixed root dir file count lost and wrong FAT entries cleared
+//         on cached ('s') media in PutEFE/EraseEFEs
+//       - Output files are truncated (EFE, EDE/EDA, split/join): no
+//         stale tail from an older, larger file
+//       - EDE/EDA skip table: zeroed header, bit test that also works
+//         where char is unsigned (ARM)
+//       - Fixed Mac-format EFE/EDx conversion temp file (mkstemp)
+//       - 64-bit file offsets (volumes over 4GB)
+//       - Bounds checks for entry indices (-g/-e/-p/-d) and dir depth
+//       - Fixed buffer overflows: disk label, multi-file type text
+//       - ImageCopy: read/write error checks, no division by zero
 //  v1.64:
 //       - Added/fixed support for Raspberry Pi
 //  v1.63:
@@ -264,7 +284,7 @@
 // (this value is ORed, so no harm is done..)
 #endif
 
-#define VERSION "v1.64"
+#define VERSION "v1.65"
 
 #define BLOCK_SIZE 512    // amount of bytes per block
 #define ID_BLOCK 1        // ID block is 1 because block 0 is null (0x6D/0xB6 filler)
@@ -601,6 +621,9 @@ void ParseRange(char *optarg, char process_EFE[MAX_NUM_OF_DIR_ENTRIES])
   {
     to_EFE = atoi(tmp_str + ssize + 1);
   }
+  // (entries 0..38 only)
+  if (to_EFE > MAX_NUM_OF_DIR_ENTRIES - 1)
+    to_EFE = MAX_NUM_OF_DIR_ENTRIES - 1;
   // Mark the range of EFEs
   for (i = from_EFE; i <= to_EFE; i++)
     process_EFE[i] = 1;
@@ -625,7 +648,7 @@ void ParseList(char *optarg, char process_EFE[MAX_NUM_OF_DIR_ENTRIES])
     {
       ParseRange(tmp_str + j, process_EFE);
     }
-    else
+    else if (atoi(tmp_str + j) < MAX_NUM_OF_DIR_ENTRIES)
     {
       process_EFE[atoi(tmp_str + j)] = 1;
     }
@@ -657,7 +680,7 @@ void ParseEntry(char *optarg, char process_EFE[MAX_NUM_OF_DIR_ENTRIES])
       {
         ParseRange(optarg, process_EFE);
       }
-      else
+      else if (atoi(optarg) >= 0 && atoi(optarg) < MAX_NUM_OF_DIR_ENTRIES)
       {
         // One number - Mark it
         process_EFE[atoi(optarg)] = 1;
@@ -713,6 +736,10 @@ int ParseDir(char *dirpath_str, unsigned int *DirPath, unsigned int *subdir_cnt)
   idx = dir_str;
   while ((idx_new = (char *)index(idx, '/')) != NULL)
   {
+    if (*subdir_cnt >= MAX_DIR_DEPTH)
+    {
+      EEXIT((stderr, "ERROR: Directory path '%s' is too deep.\n", dirpath_str));
+    }
     *idx_new = '\0';
     DirPath[*subdir_cnt] = atoi(idx);
     idx = idx_new + 1;
@@ -771,7 +798,7 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
   unsigned int type, real_type, j, k;
   char name[13], dosname[64];
   char media[FILENAME_MAX];
-  char type_text[9];
+  char type_text[12];
   int first_item = 1;
 
   // Create variable to hold just the filename without path.
@@ -886,8 +913,8 @@ void PrintDir(unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE], unsigned int 
             strcpy(type_text, EpsTypes[type]);
             if (EFE[j][22] != 0)
             {
-              type_text[5] = '\0';
-              sprintf(type_text, "%s(%2d)", type_text, EFE[j][22]);
+              // (append in place: sprintf from and into the same buffer is undefined)
+              sprintf(type_text + 5, "(%2d)", EFE[j][22]);
               printf(" %02d | %s| %-12s | %7d | %s | %12ld |\n", j, type_text, name, size, dosname, (unsigned long)(size + 1) * 512);
             }
             else
@@ -1484,7 +1511,7 @@ int ConvertMacFormat(int *in, char *in_file)
   int out;
   // int c;
   unsigned int Hdr, i, prev;
-  char temp_file[FILENAME_MAX];
+  char temp_file[FILENAME_MAX] = "EpsLinMacXXXXXX"; // mkstemp template
   unsigned char *mem_pointer;
   struct stat stat_buf;
 
@@ -1496,8 +1523,8 @@ int ConvertMacFormat(int *in, char *in_file)
   if (Hdr == 0x0a0d0d)
   {
 
-    mkstemp(temp_file);
-    if ((out = open(temp_file, O_RDWR | O_BINARY)) < 0)
+    // mkstemp creates and opens the file
+    if ((out = mkstemp(temp_file)) < 0)
     {
       EEXIT((stderr, "ERROR: Couldn't open file '%s'. \n", temp_file));
     }
@@ -1571,7 +1598,8 @@ int ConvertToImage(char in_file[FILENAME_MAX], char out_file[FILENAME_MAX])
     EEXIT((stderr, "ERROR: Couldn't open file '%s'. \n", in_file));
   }
 
-  if ((out = open(out_file, O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS)) < 0)
+  // O_TRUNC: an existing, larger file must not leave its tail behind
+  if ((out = open(out_file, O_RDWR | O_CREAT | O_TRUNC | O_BINARY, FILE_RIGHTS)) < 0)
   {
     EEXIT((stderr, "ERROR: Couldn't open file '%s'. \n", out_file));
   }
@@ -1708,7 +1736,8 @@ int ConvertToImage(char in_file[FILENAME_MAX], char out_file[FILENAME_MAX])
         // 8 bits per byte, so each bit holds the skip-or-not value of one block
         for (j = 0; j < 8; j++)
         {
-          if (bits < 0)
+          // (test the bit: 'bits < 0' fails where char is unsigned, e.g. ARM)
+          if (bits & 0x80)
           {
             // if block was skipped then write filler block
             write(out, buffer, BLOCK_SIZE);
@@ -1800,12 +1829,14 @@ int ConvertFromImage(char in_file[FILENAME_MAX], char out_file[FILENAME_MAX], ch
   {
     EEXIT((stderr, "ERROR: Couldn't open file '%s'.", in_file));
   }
-  if ((out = open(out_file, O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS)) < 0)
+  // O_TRUNC: the EDx may get shorter (e.g. after erasing files)
+  if ((out = open(out_file, O_RDWR | O_CREAT | O_TRUNC | O_BINARY, FILE_RIGHTS)) < 0)
   {
     EEXIT((stderr, "ERROR: Couldn't open file '%s'.", out_file));
   }
 
-  mem_pointer = malloc(BLOCK_SIZE);
+  // zeroed: the header is not written in full below
+  mem_pointer = calloc(1, BLOCK_SIZE);
   if (mem_pointer == NULL)
     EEXIT((stderr, "ERROR: Couldn't allocate memory!!!! \n"));
 
@@ -1873,7 +1904,7 @@ int ConvertFromImage(char in_file[FILENAME_MAX], char out_file[FILENAME_MAX], ch
       else
       {
         // otherwise write the used block as normal
-        lseek(in, block * BLOCK_SIZE, SEEK_SET);
+        lseek(in, (off_t)block * BLOCK_SIZE, SEEK_SET);
         read(in, Data, BLOCK_SIZE);
         write(out, Data, BLOCK_SIZE);
       }
@@ -3124,7 +3155,7 @@ int ReadBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block
     printf("Num_of_blocks=%d <-> total_blocks=%d \n", num_of_blocks, pre_blocks + cont_blocks + post_blocks);
 #endif
 
-    if ((lseek(file, (long)((start_block / 4) * 2048), SEEK_SET)) < 0)
+    if ((lseek(file, (off_t)(start_block / 4) * 2048, SEEK_SET)) < 0)
     {
       perror("seek");
     }
@@ -3168,7 +3199,7 @@ int ReadBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_block
     }
 
 #else // Linux
-    if (lseek(file, start_block * BLOCK_SIZE, SEEK_SET) == -1)
+    if (lseek(file, (off_t)start_block * BLOCK_SIZE, SEEK_SET) == -1)
     {
       printf("ERROR in seek! \n");
       exit(ERR);
@@ -3247,7 +3278,7 @@ int WriteBlocks(char media_type, FD_HANDLE fd, int file, unsigned int start_bloc
 #ifdef __CYGWIN__
   case 's':
 #endif
-    lseek(file, start_block * BLOCK_SIZE, SEEK_SET);
+    lseek(file, (off_t)start_block * BLOCK_SIZE, SEEK_SET);
     write(file, buffer, BLOCK_SIZE * length);
     return (OK);
 
@@ -3688,7 +3719,7 @@ void SaveDirBlocks(char media_type, FD_HANDLE fd, unsigned char *DiskFAT, int fi
   }
   // .. and tail (ie. '00000000' and 'DR')
 
-  for (i = 10; i < 2; i--)
+  for (i = 10; i > 2; i--)
   {
     Dir[DIR_BLOCKS * BLOCK_SIZE - i] = 0;
   }
@@ -3769,7 +3800,7 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
   char Header[BLOCK_SIZE];
   char name[13], dosname[64], tmp_name[64];
   unsigned char Data[BLOCK_SIZE];
-  char type_text[8];
+  char type_text[12];
 
   // Process list of EFEs
   for (j = 0; j < MAX_NUM_OF_DIR_ENTRIES; j++)
@@ -3811,8 +3842,8 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
     if (EFE[j][22] != 0)
     {
       strcpy(type_text, EpsTypes[type]);
-      type_text[5] = '\0';
-      sprintf(type_text, "%s%2d", type_text, EFE[j][22]);
+      // (append in place: sprintf from and into the same buffer is undefined)
+      sprintf(type_text + 5, "%2d", EFE[j][22]);
       sprintf(tmp_name, "[%s] %s", type_text, dosname);
     }
     else
@@ -3854,8 +3885,9 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
     for (i = 59; i < BLOCK_SIZE; i++)
       Header[i] = 0;
 
-    // Open for reading and writing (O_RDWR).
-    if ((out = open(dosname, O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS)) < 0)
+    // Open for reading and writing (O_RDWR). O_TRUNC: an older, larger file
+    // of the same name must not leave its tail behind.
+    if ((out = open(dosname, O_RDWR | O_CREAT | O_TRUNC | O_BINARY, FILE_RIGHTS)) < 0)
     {
       EEXIT((stderr, "ERROR: Couldn't create '%s' to write EFE! \n", dosname));
     }
@@ -3891,6 +3923,7 @@ int GetEFEs(char media_type, FD_HANDLE fd, int in, unsigned char EFE[MAX_NUM_OF_
       ReadBlocks(media_type, fd, in, start, cont, mem_pointer);
       // Write out the contiguous blocks which were stored into buffer.
       write(out, mem_pointer, BLOCK_SIZE * cont);
+      free(mem_pointer);
     } // end copying contiguous blocks in DISK mode
 
     // Stage 2: Contiguous blocks have all been read, so now get
@@ -4044,7 +4077,8 @@ int PutEFE(
   }
 
   // Check if any EFE filenames were supplied by command-line at all -- if not then routine has nothing to do!
-  if (EFE_files[optind] == NULL)
+  // (An EFE from memory -- mkdir -- has no filenames: EFE_files is NULL.)
+  if ((MemData == NULL) && (EFE_files[optind] == NULL))
   {
     printf("Warning: Cannot put an EFE which has not been specified! \n");
     return (ERR);
@@ -4062,10 +4096,15 @@ int PutEFE(
   // Check for wildcard globbing, and process if found, otherwise use individual filenames from command-line.
   //
   // Copy the first EFE filename passed by command-line into another variable -- maybe a normal name, maybe a wildcard.
-  strcpy(in_file, EFE_files[optind]);
+  if (MemData == NULL)
+    strcpy(in_file, EFE_files[optind]);
   // See if EFE filename is normal or a wildcard -- expands the wildcard to individual filename if applicable.
   // Remember: strcmp returns 0 when true rather than 1.
-  if ((strcasecmp(in_file, "ALL") == 0) || (strcasecmp(in_file, "*.EFE") == 0) || (strcasecmp(in_file, "*.EFA") == 0) || (strcasecmp(in_file, "*.INS") == 0))
+  if (MemData != NULL)
+  {
+    // EFE from memory: no filenames to list
+  }
+  else if ((strcasecmp(in_file, "ALL") == 0) || (strcasecmp(in_file, "*.EFE") == 0) || (strcasecmp(in_file, "*.EFA") == 0) || (strcasecmp(in_file, "*.INS") == 0))
   {
     if (printmode == HUMAN_READABLE)
     {
@@ -4139,10 +4178,9 @@ int PutEFE(
         break;
     }
 
-    process_EFE[idx] = 1;
-
-    // Produce an error if attempting to write a 39th entry to one directory.
-    if (idx == MAX_NUM_OF_DIR_ENTRIES)
+    // Produce an error if attempting to write a 39th entry to one directory
+    // (or when the start index given with -p is out of range).
+    if (idx >= MAX_NUM_OF_DIR_ENTRIES)
     {
       printf("\r                                         \r");
       fflush(stdout);
@@ -4160,6 +4198,8 @@ int PutEFE(
       printf("ERROR: Directory full! \n");
       return (ERR);
     }
+
+    process_EFE[idx] = 1;
 
     if (MemData == NULL)
     {
@@ -4316,7 +4356,7 @@ int PutEFE(
             mem_pointer = malloc(BLOCK_SIZE * EFE_blks);
 
             // Copy Blocks to buffer
-            lseek(out, BLOCK_SIZE * free_start, SEEK_SET);
+            lseek(out, (off_t)BLOCK_SIZE * free_start, SEEK_SET);
             for (j = 0; j < EFE_blks; j++)
             {
 
@@ -4482,7 +4522,9 @@ int PutEFE(
 
       free(mem_pointer);
 
-      if (i == total_blks)
+      // (Not 'i == total_blks': that is also the case when the last block
+      // used is the last block of the disk.)
+      if (free_cnt != EFE_blks)
       {
         EEXIT((stderr, "ERROR: Image/disk has a corrupted FAT!! \n"));
       }
@@ -4553,8 +4595,13 @@ int PutEFE(
     if (media_type == 'f')
     {
       // FILE ACCESS
-      lseek(out, dir_start * BLOCK_SIZE + EFE_SIZE * idx, SEEK_SET);
-      write(out, EFE[idx], EFE_SIZE);
+      // Root dir only: its blocks are contiguous. A sub-dir is saved with
+      // SaveDirBlocks below (its 2nd block need not follow the 1st one).
+      if (dir_start == DIR_START_BLOCK)
+      {
+        lseek(out, dir_start * BLOCK_SIZE + EFE_SIZE * idx, SEEK_SET);
+        write(out, EFE[idx], EFE_SIZE);
+      }
     }
     else
     {
@@ -4583,8 +4630,10 @@ int PutEFE(
       parent_dir_idx = (unsigned int)((EFE[0][16] << 8) + EFE[0][17]);
       dir_start = (unsigned long)((EFE[0][18] << 24) + (EFE[0][19] << 16) + (EFE[0][20] << 8) + EFE[0][21]);
 
-      // Don't know how many contiguous blocks so assume worst case.
-      dir_cont = 1;
+      // Don't know how many contiguous blocks so assume worst case
+      // (follow the FAT). The root dir is always blocks 3-4: its FAT entry
+      // is 1 (system block), following it would use block 1 (ID block).
+      dir_cont = (dir_start == DIR_START_BLOCK) ? 2 : 1;
 
       // Load parent dir
       LoadDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, ParentEFE);
@@ -4599,7 +4648,19 @@ int PutEFE(
 
       // Save changes in parent dir
       SaveDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, ParentEFE);
+
+      // DISK ACCESS: the system blocks (with the root dir) are written from
+      // DiskHdr at the end, so the root dir has to be updated there too.
+      if ((media_type != 'f') && (dir_start == DIR_START_BLOCK))
+      {
+        memcpy(DiskHdr + DIR_START_BLOCK * BLOCK_SIZE + EFE_SIZE * parent_dir_idx,
+               ParentEFE[parent_dir_idx], EFE_SIZE);
+      }
     }
+    // The EFE file is done
+    if (MemData == NULL)
+      close(in);
+
     // advance to next EFE filename passed by the command-line
     EFEindex++;
 
@@ -4622,12 +4683,7 @@ int PutEFE(
     // Convert to back to original format if not raw image
     if ((image_type != EPS_TYPE) && (image_type != ASR_TYPE) && (image_type != E16_SD_TYPE) && (image_type != ASR_SD_TYPE) && (image_type != OTHER_TYPE))
     {
-
-      if (MemData != NULL)
-      {
-        close(in);
-      }
-
+      // (each EFE file is closed when it is done)
       close(out);
       ConvertFromImage(image_file, orig_image_name, image_type);
     }
@@ -4716,13 +4772,10 @@ int EraseEFEs(char media_type, char image_type, FD_HANDLE fd,
     *free_blks = (*free_blks) + size;
 
     // Clear FAT entries
-#ifdef __CYGWIN__
-    if (((media_type == 'f') || (media_type == 's')) && cont == size)
-    {
-#else // Linux
+    // (Not for 's' media: their FAT is cached in DiskFAT, which
+    // WriteFATBlocks does not update.)
     if (media_type == 'f' && cont == size)
     {
-#endif
       // Use buffering if cont blocks
       WriteFATBlocks(media_type, DiskFAT, out, start, cont, 1);
     }
@@ -4797,8 +4850,9 @@ int EraseEFEs(char media_type, char image_type, FD_HANDLE fd,
     parent_dir_idx = (unsigned int)((EFE[0][16] << 8) + EFE[0][17]);
     dir_start = (unsigned long)((EFE[0][18] << 24) + (EFE[0][19] << 16) + (EFE[0][20] << 8) + EFE[0][21]);
 
-    // Don't know how many cont blocks so suppose worst case
-    dir_cont = 1;
+    // Don't know how many cont blocks so suppose worst case (follow the
+    // FAT). The root dir is always blocks 3-4 (see PutEFE).
+    dir_cont = (dir_start == DIR_START_BLOCK) ? 2 : 1;
 
     // Load parent dir
     LoadDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, ParentEFE);
@@ -4808,11 +4862,12 @@ int EraseEFEs(char media_type, char image_type, FD_HANDLE fd,
                                       ParentEFE[parent_dir_idx][15]);
 
     // Decrement 'num. of files' in parent dir
-    parent_dir_files = parent_dir_files - counter;
-
-    // if everything is OK, this _should_ NOT happen...
-    if (parent_dir_files < 0)
+    // if everything is OK, going below zero _should_ NOT happen...
+    // (checked before subtracting: the count is unsigned)
+    if (parent_dir_files < counter)
       parent_dir_files = 0;
+    else
+      parent_dir_files = parent_dir_files - counter;
 
     ParentEFE[parent_dir_idx][14] = (unsigned char)(parent_dir_files >> 8) & 0xFF;
     ParentEFE[parent_dir_idx][15] = (unsigned char)(parent_dir_files & 0xFF);
@@ -5034,7 +5089,7 @@ void SplitEFE(char *in_file, char *slice_type, int argc)
     slice_count++;
     sprintf(out_file, "%s%02d%s", out_file_head, slice_count, out_file_tail);
 
-    if ((out = open(out_file, O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS)) < 0)
+    if ((out = open(out_file, O_RDWR | O_CREAT | O_TRUNC | O_BINARY, FILE_RIGHTS)) < 0)
     {
       EEXIT((stderr, "ERROR: Couldn't open file '%s'. \n", out_file));
     }
@@ -5093,7 +5148,7 @@ void JoinEFEs(int argc, char **argv)
 
   sprintf(out_file, "%s", argv[2]);
   // Open Output file
-  if ((out = open(out_file, O_RDWR | O_CREAT | O_BINARY, FILE_RIGHTS)) < 0)
+  if ((out = open(out_file, O_RDWR | O_CREAT | O_TRUNC | O_BINARY, FILE_RIGHTS)) < 0)
   {
     EEXIT((stderr, "ERROR: Couldn't open file '%s'. \n", out_file));
   }
@@ -5494,7 +5549,7 @@ void GetInfo(char *media_type, FD_HANDLE fd, unsigned char **DiskFAT, unsigned c
     for (i = 0; i < subdir_cnt; i++)
     {
       j = DirPath[i];
-      if (EFE[j][1] != 2)
+      if ((j >= MAX_NUM_OF_DIR_ENTRIES) || (EFE[j][1] != 2))
       {
         EEXIT((stderr, "ERROR: Index '%d' is not a directory! \n\n", j));
       }
@@ -5734,7 +5789,8 @@ int ImageCopy(char *source_file_name, char *target_file_name)
   unsigned char buffer[IMAGE_COPY_BUFFER_BLOCKS * BLOCK_SIZE];
 
   int source, target;
-  unsigned int read_bytes, write_bytes;
+  int read_bytes, write_bytes; // signed: read/write return -1 on error
+  unsigned long chunks;
 
   printf("\n");
 
@@ -5808,7 +5864,11 @@ int ImageCopy(char *source_file_name, char *target_file_name)
     if (read_bytes == 0)
       break;
 
-    printf("\rCopying image file... %lu%% completed", ((100 * i++) / ((source_file_size / BLOCK_SIZE) / IMAGE_COPY_BUFFER_BLOCKS)));
+    // (at least 1: images smaller than one chunk)
+    chunks = (source_file_size / BLOCK_SIZE) / IMAGE_COPY_BUFFER_BLOCKS;
+    if (chunks == 0)
+      chunks = 1;
+    printf("\rCopying image file... %lu%% completed", ((100 * (unsigned long)i++) / chunks));
 
     write_bytes = write(target, buffer, read_bytes);
     if (write_bytes < 0)
@@ -5836,7 +5896,7 @@ int main(int argc, char **argv)
 
   unsigned char EFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE];
   unsigned char *DiskFAT, *DiskHdr, *mem_pointer;
-  char DiskLabel[DISK_LABEL_SIZE];
+  char DiskLabel[DISK_LABEL_SIZE + 1]; // + terminating '\0'
 
   unsigned int DirPath[MAX_DIR_DEPTH], subdir_cnt;
   unsigned int total_blks, free_blks, fat_blks;
@@ -5884,6 +5944,7 @@ int main(int argc, char **argv)
   confirm_operation = 0;
   // generate default disk label
   strncpy(DiskLabel, DEFAULT_DISK_LABEL, DISK_LABEL_SIZE);
+  DiskLabel[DISK_LABEL_SIZE] = '\0';
 
   fd = (FD_HANDLE)NULL;
 
@@ -5972,6 +6033,7 @@ int main(int argc, char **argv)
 
     case 'l':
       strncpy(DiskLabel, optarg, DISK_LABEL_SIZE);
+      DiskLabel[DISK_LABEL_SIZE] = '\0';
       break;
 
     case 'g': // ** Get EFEs **
