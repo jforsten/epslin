@@ -61,6 +61,10 @@
 //       - TODO: add recursive mode for GetEFE
 //       - TODO: create named sub-directories when GetEFE is used
 //               such as 'root', etc. to hold EFEs on export
+//  v1.68:
+//       - Fixed putting several EFEs into a sub-dir in one command: from
+//         the 2nd EFE on, the entry went to the parent dir
+//       - Fixed MkDir (-m) writing garbage to the OS version field
 //  v1.67:
 //       - Images and devices over 4GB: 64-bit sizes in listings, check
 //         (-C), image copy (-I) and image size (-fi); 64-bit file offsets
@@ -318,7 +322,7 @@
 // (this value is ORed, so no harm is done..)
 #endif
 
-#define VERSION "v1.67"
+#define VERSION "v1.68"
 
 #define BLOCK_SIZE 512    // amount of bytes per block
 #define ID_BLOCK 1        // ID block is 1 because block 0 is null (0x6D/0xB6 filler)
@@ -4651,6 +4655,9 @@ int PutEFE(
       // EFE from memory (ie. for ex. mkdir)
       //====================================
 
+      // Not an OS: the OS version on the disk stays as it is
+      OS = 0;
+
 #ifdef __CYGWIN__
       if ((media_type == 'f') || (media_type == 's'))
       {
@@ -4989,21 +4996,24 @@ int PutEFE(
 
       unsigned char ParentEFE[MAX_NUM_OF_DIR_ENTRIES][EFE_SIZE];
       unsigned int parent_dir_idx, parent_dir_files;
+      // (own variables: dir_start/dir_cont are still needed for the next
+      // EFE put into this dir)
+      unsigned int parent_start, parent_cont;
 
       // Save changes in current dir
       SaveDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, EFE);
 
       // Get info about parent dir
       parent_dir_idx = (unsigned int)((EFE[0][16] << 8) + EFE[0][17]);
-      dir_start = (unsigned long)((EFE[0][18] << 24) + (EFE[0][19] << 16) + (EFE[0][20] << 8) + EFE[0][21]);
+      parent_start = (unsigned long)((EFE[0][18] << 24) + (EFE[0][19] << 16) + (EFE[0][20] << 8) + EFE[0][21]);
 
       // Don't know how many contiguous blocks so assume worst case
       // (follow the FAT). The root dir is always blocks 3-4: its FAT entry
       // is 1 (system block), following it would use block 1 (ID block).
-      dir_cont = (dir_start == DIR_START_BLOCK) ? 2 : 1;
+      parent_cont = (parent_start == DIR_START_BLOCK) ? 2 : 1;
 
       // Load parent dir
-      LoadDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, ParentEFE);
+      LoadDirBlocks(media_type, fd, DiskFAT, out, parent_start, parent_cont, ParentEFE);
 
       // Update parent dir 'num. of files'
       parent_dir_files = (unsigned int)((ParentEFE[parent_dir_idx][14] << 8) +
@@ -5014,11 +5024,11 @@ int PutEFE(
       ParentEFE[parent_dir_idx][15] = (unsigned char)(parent_dir_files & 0xFF);
 
       // Save changes in parent dir
-      SaveDirBlocks(media_type, fd, DiskFAT, out, dir_start, dir_cont, ParentEFE);
+      SaveDirBlocks(media_type, fd, DiskFAT, out, parent_start, parent_cont, ParentEFE);
 
       // DISK ACCESS: the system blocks (with the root dir) are written from
       // DiskHdr at the end, so the root dir has to be updated there too.
-      if ((media_type != 'f') && (dir_start == DIR_START_BLOCK))
+      if ((media_type != 'f') && (parent_start == DIR_START_BLOCK))
       {
         memcpy(DiskHdr + DIR_START_BLOCK * BLOCK_SIZE + EFE_SIZE * parent_dir_idx,
                ParentEFE[parent_dir_idx], EFE_SIZE);
